@@ -33,13 +33,7 @@
     raw: p => `https://raw.githubusercontent.com/${S.repo}/${S.branch}/${p}`,
     headers: () => { const h = { 'Accept': 'application/vnd.github+json' }; if (S.token) h['Authorization'] = 'Bearer ' + S.token; return h; },
     async read(path) {
-      if (!S.token) {
-        const r = await fetch(api.raw(path) + '?t=' + Date.now(), { cache: 'no-store' });
-        if (r.status === 404) return null;
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return { text: await r.text(), sha: null };
-      }
-      const r = await fetch(api.base() + encodeURI(path) + '?ref=' + S.branch, { headers: api.headers(), cache: 'no-store' });
+      const r = await fetch(api.base() + encodeURI(path) + '?ref=' + S.branch + '&t=' + Date.now(), { headers: api.headers(), cache: 'no-store' });
       if (r.status === 404) return null;
       if (!r.ok) throw Object.assign(new Error('HTTP ' + r.status), { status: r.status });
       const j = await r.json();

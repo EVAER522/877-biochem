@@ -142,7 +142,7 @@
     } catch (e) { }
   }
   function setUser(u, silent) {
-    S.user = u; saveJSON(LS.cur, u);
+    S.user = u; localStorage.setItem(LS.cur, u);
     const users = allUsers(); if (!users.includes(u)) { users.push(u); saveJSON(LS.users, users); }
     loadRec(u); updateUserName(); render();
     if (!silent) pullFromRepo(u, true);
@@ -545,7 +545,10 @@
     S.repo = localStorage.getItem(LS.repo) || S.repo;
     S.branch = localStorage.getItem(LS.branch) || 'main';
     S.auto = loadJSON(LS.auto, true);
-    const cur = localStorage.getItem(LS.cur) || '';
+    let cur = localStorage.getItem(LS.cur) || '';
+    cur = cur.trim();
+    if (cur.charAt(0) === '"') { try { cur = JSON.parse(cur); } catch (e) { cur = cur.replace(/^"|"$/g, ''); } }
+    if (cur.indexOf('\\"') >= 0) cur = cur.replace(/\\?"/g, '');
     await loadRemoteIndex();
     if (!cur) { render(); userSheet(); return; }
     setUser(cur, true);

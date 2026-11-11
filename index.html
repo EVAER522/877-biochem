@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no"/>
+<meta name="theme-color" content="#0f766e"/>
+<title>877生化速刷</title>
+<link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="tb-left">
+    <div class="tb-title">
+      <div class="tb-main" id="tbTitle">877生化速刷</div>
+      <div class="tb-sub" id="tbSub">南航877 · 807题 · 按章节考点</div>
+    </div>
+  </div>
+  <div class="tb-right">
+    <button class="user-chip" id="btnUser"><span class="dot" id="syncDot"></span><span id="userName">未选择</span></button>
+  </div>
+</header>
+
+<main id="view"></main>
+
+<nav class="tabbar" id="tabbar">
+  <button class="tab active" data-tab="quiz"><span>刷题</span></button>
+  <button class="tab" data-tab="logs"><span>记录</span></button>
+  <button class="tab" data-tab="me"><span>我的</span></button>
+</nav>
+
+<div class="sheet-mask" id="sheetMask"></div>
+<div class="sheet" id="sheet"></div>
+<div class="toast" id="toast"></div>
+
+<script src="questions.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -5,7 +5,7 @@
   const KPS = window.KPS || [];
   const LS = {
     users: 'qb.users', cur: 'qb.cur', token: 'qb.token', repo: 'qb.repo', branch: 'qb.branch',
-    auto: 'qb.auto', rec: u => 'qb.rec.' + u
+    auto: 'qb.auto', rec: u => 'qb.rec.' + u, sess: u => 'qb.sess.' + u
   };
   const COLORS = ['#0f766e', '#9a3412', '#4338ca'];
   const RATE_TXT = { forgot: '忘记', vague: '模糊', known: '熟悉' };
@@ -15,7 +15,7 @@
     filter: { chap: '', kp: '', scope: 'all', order: 'seq' },
     queue: [], idx: 0, phase: 'ask', revealed: {}, picked: null,
     session: null, token: '', repo: 'EVAER522/877-biochem', branch: 'main',
-    auto: true, sync: { state: 'idle', msg: '' }, _syncTimer: null, _syncing: false
+    auto: true, snap: null, sync: { state: 'idle', msg: '' }, _syncTimer: null, _syncing: false
   };
 
   /* ---------- utils ---------- */
@@ -67,13 +67,29 @@
   /* ---------- record ---------- */
   function blankRec(u) { return { u, updated: 0, progress: {}, fav: [], sessions: [] }; }
   function loadRec(u) {
-    S.rec = loadJSON(LS.rec(u), null) || blankRec(u);
+    let r = loadJSON(LS.rec(u), null);
+    if (!r) {
+      const bad = loadJSON(LS.rec('"' + u + '"'), null);
+      if (bad) { r = bad; saveJSON(LS.rec(u), r); localStorage.removeItem(LS.rec('"' + u + '"')); }
+    }
+    S.rec = r || blankRec(u);
     S.rec.fav = S.rec.fav || []; S.rec.progress = S.rec.progress || {}; S.rec.sessions = S.rec.sessions || [];
   }
   function saveRec() {
     S.rec.updated = now();
     saveJSON(LS.rec(S.user), S.rec);
     scheduleSync();
+  }
+  function saveSess() {
+    if (!S.user || S.view !== 'quiz' || !S.queue || !S.queue.length) return;
+    saveJSON(LS.sess(S.user), { t: now(), filter: { ...S.filter }, idx: S.idx, ids: S.queue.map(q => q.id) });
+  }
+  function clearSess() { if (S.user) localStorage.removeItem(LS.sess(S.user)); S.snap = null; }
+  function loadSess(u) { S.snap = loadJSON(LS.sess(u), null) || null; }
+  function snapInfo() {
+    const s = S.snap; if (!s || !s.ids || !s.ids.length) return null;
+    if (s.idx >= s.ids.length) return null;
+    return s;
   }
   function mergeRec(local, remote) {
     const out = blankRec(local.u || remote.u);
@@ -142,6 +158,7 @@
     } catch (e) { }
   }
   function setUser(u, silent) {
+    loadSess(u);
     S.user = u; localStorage.setItem(LS.cur, u);
     const users = allUsers(); if (!users.includes(u)) { users.push(u); saveJSON(LS.users, users); }
     loadRec(u); updateUserName(); render();
@@ -211,7 +228,20 @@
     const cnt = buildQueue().length;
     const p = S.rec.progress;
     const known = Object.values(p).filter(x => x.r === 'known').length;
+    const sn = snapInfo();
+    const snapCard = sn ? `<div class="card" style="border:1px solid var(--pri);background:linear-gradient(180deg,#f0fdfa,#fff)">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div><div class="h1" style="margin:0">继续上次</div>
+        <div class="muted" style="margin-top:4px">${esc((sn.filter && sn.filter.chap ? shortName(((CHS.find(c => c.id === sn.filter.chap)) || {}).name || '') : '全部章节'))}${sn.filter && sn.filter.kp ? ' · ' + esc(sn.filter.kp) : ''}<br>停在第 ${sn.idx + 1} / ${sn.ids.length} 题 · ${new Date(sn.t).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div></div>
+        <div class="badge pri">${sn.ids.length - sn.idx} 题待刷</div>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button class="btn" style="flex:2" data-act="resume">继续刷（第 ${sn.idx + 1} 题）</button>
+        <button class="btn ghost" style="flex:1" data-act="dropSess">不继续</button>
+      </div>
+    </div>` : '';
     return `
+    ${snapCard}
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:flex-start">
         <div><div class="h1" style="margin:0">选范围，开刷</div>
@@ -409,7 +439,21 @@
     if (!S.queue.length) { toast('这个范围没有题目'); return; }
     S.idx = 0; S.phase = 'ask'; S.revealed = {}; S.picked = null; S.rated = null;
     S.session = { t: now(), scope: scopeLabel().ch + ' · ' + scopeLabel().kp + ' · ' + scopeLabel().sc, n: 0, forgot: 0, vague: 0, known: 0, correct: 0, wrong: 0 };
-    S.view = 'quiz'; S.tab = 'quiz'; render();
+    S.view = 'quiz'; S.tab = 'quiz'; render(); saveSess();
+  }
+  function resumeSession() {
+    const s = snapInfo();
+    if (!s) { toast('没有可继续的进度'); return; }
+    const map = new Map(BANK.map(q => [q.id, q]));
+    const list = s.ids.map(id => map.get(id)).filter(Boolean);
+    if (!list.length) { clearSess(); toast('上次的题目已失效'); render(); return; }
+    S.filter = Object.assign({ chap: '', kp: '', scope: 'all', order: 'seq' }, s.filter || {});
+    S.queue = list;
+    S.idx = Math.min(s.idx || 0, list.length - 1);
+    S.phase = 'ask'; S.revealed = {}; S.picked = null; S.rated = null; S.correctFlag = null;
+    const lb = scopeLabel();
+    S.session = { t: now(), scope: lb.ch + ' · ' + lb.kp + ' · ' + lb.sc, n: 0, forgot: 0, vague: 0, known: 0, correct: 0, wrong: 0 };
+    S.view = 'quiz'; S.tab = 'quiz'; render(); saveSess();
   }
   function answerDone(correct) {
     S.phase = 'revealed';
@@ -424,7 +468,7 @@
     const prev = S.rec.progress[q.id];
     S.rec.progress[q.id] = { r, c: S.correctFlag, n: (prev && prev.n || 0) + 1, ts: now() };
     if (S.session) { S.session.n++; S.session[r]++; S.session.dur = now() - S.session.t; }
-    S.rated = r; saveRec();
+    S.rated = r; saveRec(); saveSess();
     if (S.auto) setTimeout(() => next(true), 420); else render();
   }
   function next(auto) {
@@ -432,10 +476,11 @@
       finish(); return;
     }
     S.idx++; S.phase = 'ask'; S.revealed = {}; S.picked = null; S.rated = null; S.correctFlag = null;
-    render();
+    render(); saveSess();
   }
   function finish() {
     if (S.session) { S.rec.sessions.push({ ...S.session }); if (S.rec.sessions.length > 300) S.rec.sessions = S.rec.sessions.slice(-300); saveRec(); }
+    clearSess();
     S.view = 'summary'; render();
   }
 
@@ -450,6 +495,8 @@
         case 'scope': S.filter.scope = v; render(); return;
         case 'order': S.filter.order = v; render(); return;
         case 'start': startSession(); return;
+        case 'resume': resumeSession(); return;
+        case 'dropSess': clearSess(); render(); toast('已放弃上次进度'); return;
         case 'opt': {
           if (S.phase !== 'ask') return;
           const q = S.queue[S.idx];
@@ -554,6 +601,7 @@
     setUser(cur, true);
     pullFromRepo(cur, true);
   }
-  window.addEventListener('pagehide', () => { if (S.token && S.user) { const body = JSON.stringify(S.rec); try { navigator.sendBeacon && 0; } catch (e) { } } });
+  window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveSess(); });
+  window.addEventListener('pagehide', () => { saveSess(); if (S.token && S.user) { const body = JSON.stringify(S.rec); try { navigator.sendBeacon && 0; } catch (e) { } } });
   boot();
 })();

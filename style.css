@@ -157,3 +157,19 @@ main{padding:12px 14px 8px}
 .wbar{height:6px;border-radius:5px;background:#eef1f4;overflow:hidden;display:flex}
 .wbar i{display:block;height:100%}
 .wrow .chip{padding:6px 12px;font-size:12px;flex:none}
+
+/* 返回与题单 */
+.backrow{display:flex;align-items:center;gap:10px;margin:0 2px 8px}
+.backbtn{font-size:13px;color:var(--tx2);background:#fff;border:1px solid var(--line);border-radius:9px;padding:6px 10px}
+.bk-sub{font-size:11px;color:var(--tx3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qrow{display:block;width:100%;text-align:left;padding:12px 0;border-bottom:1px solid var(--line)}
+.qrow:last-child{border-bottom:0}
+.qh{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.qs{font-size:14px;line-height:1.5;margin-top:6px;color:var(--tx)}
+.qst{font-size:10px;padding:2px 6px;border-radius:5px}
+.qst.forgot{background:#fdeee7;color:var(--forgot)}
+.qst.vague{background:#fdf3e3;color:var(--vague)}
+.qst.known{background:var(--pri-weak);color:var(--pri)}
+.qstar{color:#f0a020;font-size:13px}
+.statline{background:#fafbfc;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:14px}
+.statline b{font-size:14px}

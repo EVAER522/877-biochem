@@ -9,13 +9,14 @@
   };
   const COLORS = ['#0f766e', '#9a3412', '#4338ca'];
   const RATE_TXT = { forgot: '忘记', vague: '模糊', known: '熟悉' };
+  const LIST_NAME = { fav: '我的收藏', forgot: '忘记的题', vague: '模糊待巩固', known: '已熟悉', weak: '未掌握', all: '全部题目' };
 
   const S = {
     user: '', rec: { u: '', updated: 0, progress: {}, fav: [], sessions: [] }, tab: 'quiz', view: 'setup',
     filter: { chap: '', kp: '', scope: 'all', order: 'seq' },
     queue: [], idx: 0, phase: 'ask', revealed: {}, picked: null,
     session: null, token: '', repo: 'EVAER522/877-biochem', branch: 'main',
-    auto: true, snap: null, sw: '', custom: '', sync: { state: 'idle', msg: '' }, _syncTimer: null, _syncing: false
+    auto: true, snap: null, sw: '', custom: '', listKind: 'fav', syncAt: 0, syncErr: '', sync: { state: 'idle', msg: '' }, _syncTimer: null, _syncing: false
   };
 
   /* ---------- utils ---------- */
@@ -142,6 +143,8 @@
   }
   function setSync(st, msg) {
     S.sync = { state: st, msg: msg || '' };
+    S.syncAt = st === 'ok' ? now() : (S.syncAt || 0);
+    if (st === 'warn') S.syncErr = msg || '';
     const dot = $('syncDot'); if (dot) { dot.className = 'dot ' + (st === 'ok' ? 'ok' : st === 'warn' ? 'warn' : st === 'off' ? 'off' : ''); dot.title = msg || ''; }
   }
 
@@ -162,7 +165,8 @@
     S.user = u; localStorage.setItem(LS.cur, u);
     const users = allUsers(); if (!users.includes(u)) { users.push(u); saveJSON(LS.users, users); }
     loadRec(u); updateUserName(); render();
-    if (!silent) pullFromRepo(u, true);
+    if (!silent && S.token) pullFromRepo(u, true);
+    else if (!S.token) setSync('off', '仅本地（未配置令牌）');
   }
   function updateUserName() { const el = $('userName'); if (el) el.textContent = S.user || '未选择'; }
 
@@ -197,7 +201,7 @@
   function render() {
     updateUserName(); updateTabbar();
     const v = $('view');
-    if (S.tab === 'quiz') v.innerHTML = S.view === 'quiz' ? quizHTML() : S.view === 'summary' ? summaryHTML() : setupHTML();
+    if (S.tab === 'quiz') v.innerHTML = S.view === 'quiz' ? quizHTML() : S.view === 'summary' ? summaryHTML() : S.view === 'lists' ? listHTML() : setupHTML();
     if (S.tab === 'weak') v.innerHTML = weakHTML();
     if (S.tab === 'logs') v.innerHTML = logsHTML();
     if (S.tab === 'me') v.innerHTML = meHTML();
@@ -212,6 +216,7 @@
     if (S.tab === 'me') { t.textContent = '我的'; s.textContent = '账号、同步与数据'; return; }
     if (S.tab === 'weak') { t.textContent = '薄弱考点'; s.textContent = '按小知识点统计掌握情况'; return; }
     if (S.view === 'quiz') { t.textContent = '刷题中'; s.textContent = `${S.idx + 1} / ${S.queue.length} · ${S.custom || (esc(shortName(scopeLabel().ch)) + (S.filter.kp ? ' · ' + S.filter.kp : ''))}`; return; }
+    if (S.view === 'lists') { const c = listQueue(S.listKind); t.textContent = LIST_NAME[S.listKind] || '题单'; s.textContent = `${c.length} 题 · 点题目开始刷`; return; }
     if (S.view === 'summary') { t.textContent = '本轮完成'; s.textContent = `${S.session ? S.session.n : 0} 题`; return; }
     t.textContent = '877生化速刷';
     s.textContent = `${BANK.length} 题 · ${CHS.length} 章 · ${KPS.length} 考点`;
@@ -262,6 +267,11 @@
         <div class="muted" style="margin-top:4px">已掌握 ${known} 题 · 收藏 ${S.rec.fav.length} 题</div></div>
         <div class="badge pri">${cnt} 题</div>
       </div>
+      <div class="section-label">我的题单</div>
+      <div class="row wrap">
+        ${[['fav', '收藏'], ['forgot', '忘记'], ['vague', '模糊'], ['known', '熟悉'], ['weak', '未掌握']].map(([k, n]) =>
+      `<button class="chip" data-act="listOpen" data-v="${k}">${n}<span class="n">${listQueue(k).length}</span></button>`).join('')}
+      </div>
       <div class="section-label">按章节</div><div class="row wrap">${chapChips}</div>
       ${f.chap ? `<div class="section-label">按考点</div><div class="row wrap">${kpChips}</div>` : ''}
       <div class="section-label">范围</div><div class="row wrap">${scopeChips}</div>
@@ -308,6 +318,30 @@
         <div class="sk">${esc(shortName(q.chname))} · ${esc(q.kp)}</div></button>`).join('')}</div>`;
   }
 
+  /* ----- 题单 ----- */
+  function listQueue(kind) {
+    const p = S.rec.progress || {}, fav = S.rec.fav || [];
+    if (kind === 'fav') return BANK.filter(q => fav.includes(q.id));
+    if (kind === 'all') return BANK.slice();
+    if (kind === 'weak') return BANK.filter(q => !p[q.id] || p[q.id].r !== 'known');
+    return BANK.filter(q => p[q.id] && p[q.id].r === kind);
+  }
+  function listHTML() {
+    const kind = S.listKind, list = listQueue(kind);
+    if (!list.length) return `<div class="card" style="text-align:center;padding:26px 16px">
+      <div style="font-size:15px;color:var(--tx2)">${LIST_NAME[kind]}里还没有题</div>
+      <div class="muted" style="margin:8px 0 16px">刷题时点右上角 ☆ 收藏，或做自评标记后就会出现在这里</div>
+      <button class="btn block" data-act="home">返回首页</button></div>`;
+    const p = S.rec.progress || {};
+    return `<div class="backrow"><button class="backbtn" data-act="home">‹ 首页</button>
+      <span class="bk-sub">${LIST_NAME[kind]} · ${list.length} 题</span></div>
+      <div class="card" style="padding:4px 16px">
+      ${list.map(q => `<button class="qrow" data-act="openListQ" data-v="${esc(q.id)}">
+        <div class="qh"><span class="badge pri">${esc(q.kp)}</span><span class="badge">${q.y}年 · ${esc(q.ty)}${esc(q.num)}</span>
+        ${p[q.id] ? `<span class="qst ${p[q.id].r}">${RATE_TXT[p[q.id].r]}</span>` : ''}${(S.rec.fav || []).includes(q.id) ? '<span class="qstar">★</span>' : ''}</div>
+        <div class="qs">${esc(q.stem.length > 60 ? q.stem.slice(0, 60) + '…' : q.stem)}</div></button>`).join('')}
+      </div>`;
+  }
   /* ----- 薄弱考点 ----- */
   function kpStats() {
     const p = S.rec.progress || {};
@@ -411,6 +445,7 @@
     const rated = S.rated;
     return `
     <div class="progress"><i id="qbar"></i></div>
+    <div class="backrow"><button class="backbtn" data-act="home">‹ 首页</button><span class="bk-sub">${esc(q.chname)}${st ? ' · 上次：' + RATE_TXT[st.r] : ''}</span></div>
     <div class="card">
       <div class="qhead">
         <div class="qmeta"><span class="badge pri">${esc(q.kp)}</span><span class="badge">${q.y}年 · ${esc(q.ty)}${esc(q.num)}</span></div>
@@ -471,7 +506,7 @@
     <div class="card" style="margin-top:12px">
       <div class="row" style="justify-content:space-between">
         <div><div class="h1" style="margin:0;font-size:15px">掌握分布</div>
-        <div class="muted" style="margin-top:3px">忘记 ${cnt.forgot} · 模糊 ${cnt.vague} · 熟悉 ${cnt.known}</div></div>
+        <div class="muted" style="margin-top:3px"><button data-act="listOpen" data-v="forgot">忘记 ${cnt.forgot}</button> · <button data-act="listOpen" data-v="vague">模糊 ${cnt.vague}</button> · <button data-act="listOpen" data-v="known">熟悉 ${cnt.known}</button> ›</div></div>
         <button class="chip" data-act="syncNow">${S.token ? '立即同步' : '未配置同步'}</button>
       </div>
       <div class="progress" style="margin-top:12px;height:6px;background:#f0f2f4"><i style="width:${Object.keys(p).length ? Math.round(cnt.known / Object.keys(p).length * 100) : 0}%;background:var(--pri)"></i></div>
@@ -510,6 +545,22 @@
     $('sheet').classList.add('show'); $('sheetMask').classList.add('show');
   }
   function closeSheet() { $('sheet').classList.remove('show'); $('sheetMask').classList.remove('show'); }
+  function statusSheet() {
+    const st = S.sync, dot = st.state === 'ok' ? 'ok' : st.state === 'warn' ? 'warn' : 'off';
+    const txt = { ok: '已同步', warn: '同步中／待同步', off: '仅本地（未配置令牌）', idle: '未同步' }[st.state] || '未同步';
+    openSheet(`<h3>同步状态</h3>
+      <div class="statline"><span class="dot ${dot}"></span><b>${txt}</b>
+      <div class="desc">${esc(st.msg || '')}${S.syncAt ? '<br>最近成功：' + new Date(S.syncAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}${S.syncErr ? '<br>错误：' + esc(S.syncErr) : ''}</div></div>
+      <div class="list">
+        <div class="item" data-act="switchUser"><div><div>当前用户</div><div class="k">${esc(S.user || '未选择')}</div></div><div>切换 ›</div></div>
+        <div class="item" data-act="tokenSheet"><div><div>同步令牌</div><div class="k">${S.token ? '已配置，日志写入 ' + esc(S.repo) : '未配置，只存本机'}</div></div><div>›</div></div>
+      </div>
+      <div class="row" style="margin-top:14px;gap:8px">
+        <button class="btn" style="flex:1" data-act="syncNow">立即同步</button>
+        <button class="btn ghost" style="flex:1" data-act="switchUser">切换用户</button>
+      </div>
+      <div class="desc" style="margin-top:14px">日志文件：logs/${esc(S.user || 'user')}.json；黄灯表示有改动还没写回仓库或写入失败，点“立即同步”可重试，失败原因会显示在上方。</div>`);
+  }
   function userSheet() {
     const users = allUsers();
     openSheet(`<h3>选择日志用户</h3><div class="desc">每个用户名对应仓库里一个日志文件，换设备后按同一用户名即可继续。</div>
@@ -609,6 +660,13 @@
         case 'order': S.filter.order = v; render(); return;
         case 'start': startSession(); return;
         case 'clearSearch': S.sw = ''; render(); return;
+        case 'home': S.view = 'setup'; S.tab = 'quiz'; render(); return;
+        case 'listOpen': S.listKind = v; S.view = 'lists'; S.tab = 'quiz'; render(); return;
+        case 'openListQ': {
+          const list = listQueue(S.listKind);
+          const i = list.findIndex(q => q.id === v);
+          startCustom(list, i < 0 ? 0 : i, LIST_NAME[S.listKind] + '（' + list.length + '题）'); return;
+        }
         case 'brushRes': {
           const rs = searchResults();
           startCustom(rs, 0, '搜索：' + S.sw.trim() + '（' + rs.length + '题）'); return;
@@ -668,7 +726,7 @@
         case 'prev': if (S.idx > 0) { S.idx--; S.phase = 'ask'; S.revealed = {}; S.picked = null; S.rated = null; render(); } return;
         case 'again': S.view = 'quiz'; S.queue = buildQueue(); S.idx = 0; S.session = { t: now(), scope: scopeLabel().ch + ' · ' + scopeLabel().kp + ' · ' + scopeLabel().sc, n: 0, forgot: 0, vague: 0, known: 0, correct: 0, wrong: 0 }; S.phase = 'ask'; render(); return;
         case 'toSetup': S.view = 'setup'; S.tab = 'quiz'; render(); return;
-        case 'syncNow': if (!S.token) { tokenSheet(); return; } toast('同步中…'); await pushToRepo(); render(); return;
+        case 'syncNow': if (!S.token) { tokenSheet(); return; } toast('同步中…'); await pushToRepo(); statusSheet(); render(); return;
         case 'switchUser': userSheet(); return;
         case 'pickUser': setUser(v); closeSheet(); return;
         case 'createUser': {
@@ -726,7 +784,7 @@
     render();
   }));
   $('sheetMask').addEventListener('click', closeSheet);
-  $('btnUser').addEventListener('click', userSheet);
+  $('btnUser').addEventListener('click', statusSheet);
 
   /* ---------- boot ---------- */
   async function boot() {
@@ -741,7 +799,7 @@
     await loadRemoteIndex();
     if (!cur) { render(); userSheet(); return; }
     setUser(cur, true);
-    pullFromRepo(cur, true);
+    if (S.token) pullFromRepo(cur, true); else setSync('off', '仅本地（未配置令牌）');
   }
   window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveSess(); });
   window.addEventListener('pagehide', () => { saveSess(); if (S.token && S.user) { const body = JSON.stringify(S.rec); try { navigator.sendBeacon && 0; } catch (e) { } } });

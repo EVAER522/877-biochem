@@ -9,7 +9,7 @@
   };
   const COLORS = ['#0f766e', '#9a3412', '#4338ca'];
   const RATE_TXT = { forgot: '忘记', vague: '模糊', known: '熟悉' };
-  const LIST_NAME = { fav: '我的收藏', forgot: '忘记的题', vague: '模糊待巩固', known: '已熟悉', weak: '未掌握', all: '全部题目' };
+  const LIST_NAME = { fav: '我的收藏', forgot: '忘记的题', vague: '模糊待巩固', known: '已熟悉', weak: '未掌握', done: '已练过的题', today: '今日刷的题', all: '全部题目' };
 
   const S = {
     user: '', rec: { u: '', updated: 0, progress: {}, fav: [], sessions: [] }, tab: 'quiz', view: 'setup',
@@ -332,6 +332,8 @@
     const p = S.rec.progress || {}, fav = S.rec.fav || [];
     if (kind === 'fav') return BANK.filter(q => fav.includes(q.id));
     if (kind === 'all') return BANK.slice();
+    if (kind === 'done') return BANK.filter(q => p[q.id]);
+    if (kind === 'today') { const t0 = new Date(); t0.setHours(0, 0, 0, 0); return BANK.filter(q => p[q.id] && p[q.id].ts >= t0.getTime()); }
     if (kind === 'weak') return BANK.filter(q => !p[q.id] || p[q.id].r !== 'known');
     return BANK.filter(q => p[q.id] && p[q.id].r === kind);
   }
@@ -507,10 +509,10 @@
     const todayN = sessions.filter(s => s.t >= today.getTime()).reduce((a, b) => a + (b.n || 0), 0);
     return `
     <div class="stat-grid">
-      <div class="stat"><b>${Object.keys(p).length}</b><span>已练题</span></div>
-      <div class="stat"><b>${todayN}</b><span>今日</span></div>
-      <div class="stat"><b>${fav.length}</b><span>收藏</span></div>
-      <div class="stat"><b style="color:var(--known)">${cnt.known}</b><span>熟悉</span></div>
+      <button class="stat" data-act="listOpen" data-v="done"><b>${Object.keys(p).length}</b><span>已练题 ›</span></button>
+      <button class="stat" data-act="listOpen" data-v="today"><b>${todayN}</b><span>今日 ›</span></button>
+      <button class="stat" data-act="listOpen" data-v="fav"><b>${fav.length}</b><span>收藏 ›</span></button>
+      <button class="stat" data-act="listOpen" data-v="known"><b style="color:var(--known)">${cnt.known}</b><span>熟悉 ›</span></button>
     </div>
     <div class="card" style="margin-top:12px">
       <div class="row" style="justify-content:space-between">

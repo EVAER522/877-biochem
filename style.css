@@ -173,3 +173,4 @@ main{padding:12px 14px 8px}
 .qstar{color:#f0a020;font-size:13px}
 .statline{background:#fafbfc;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:14px}
 .statline b{font-size:14px}
+.stat{appearance:none;border:0;font:inherit;cursor:pointer}

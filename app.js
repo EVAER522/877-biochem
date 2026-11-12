@@ -138,8 +138,17 @@
       setSync('ok', '已同步 ' + hhmm(now()));
     } catch (e) {
       if (e.code === 'no_token') setSync('off', '仅本地');
-      else setSync('warn', '同步失败：' + e.message);
+      else setSync('warn', '同步失败：' + e.message + '\n' + syncErrText(e));
     } finally { S._syncing = false; }
+  }
+  function syncErrText(e) {
+    const st = e.status, m = e.message || '';
+    if (st === 401) return '提示：令牌无效或已被删除，请重新生成（需勾选 877-biochem，Contents 读写）';
+    if (st === 403) return '提示：令牌权限不足，需 Contents: Read and write';
+    if (st === 404) return '提示：仓库或用户目录不存在，检查仓库名 owner/repo';
+    if (st === 409) return '提示：文件冲突，重试一次即可';
+    if (/Failed to fetch|network/i.test(m)) return '提示：网络不通，稍后重试';
+    return '';
   }
   function setSync(st, msg) {
     S.sync = { state: st, msg: msg || '' };
@@ -550,7 +559,7 @@
     const txt = { ok: '已同步', warn: '同步中／待同步', off: '仅本地（未配置令牌）', idle: '未同步' }[st.state] || '未同步';
     openSheet(`<h3>同步状态</h3>
       <div class="statline"><span class="dot ${dot}"></span><b>${txt}</b>
-      <div class="desc">${esc(st.msg || '')}${S.syncAt ? '<br>最近成功：' + new Date(S.syncAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}${S.syncErr ? '<br>错误：' + esc(S.syncErr) : ''}</div></div>
+      <div class="desc">${esc(st.msg || '')}${S.syncAt ? '<br>最近成功：' + new Date(S.syncAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}${S.syncErr ? '<br>错误：' + esc(S.syncErr).replace(/\n/g, '<br>') : ''}</div></div>
       <div class="list">
         <div class="item" data-act="switchUser"><div><div>当前用户</div><div class="k">${esc(S.user || '未选择')}</div></div><div>切换 ›</div></div>
         <div class="item" data-act="tokenSheet"><div><div>同步令牌</div><div class="k">${S.token ? '已配置，日志写入 ' + esc(S.repo) : '未配置，只存本机'}</div></div><div>›</div></div>
@@ -736,7 +745,8 @@
         }
         case 'tokenSheet': tokenSheet(); return;
         case 'saveToken': {
-          S.token = ($('tk').value || '').trim(); saveJSON(LS.token, S.token); closeSheet();
+          S.token = ($('tk').value || '').trim();
+          if (S.token && !/^(github_pat_|ghp_|github_pat_[A-Za-z0-9_]+)/.test(S.token)) toast('令牌格式不像 GitHub PAT，可能复制不全'); saveJSON(LS.token, S.token); closeSheet();
           if (S.token) { toast('测试连接…'); await pullFromRepo(S.user, false); await pushToRepo(); } else toast('已清除');
           render(); return;
         }

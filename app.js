@@ -15,7 +15,7 @@
     filter: { chap: '', kp: '', scope: 'all', order: 'seq' },
     queue: [], idx: 0, phase: 'ask', revealed: {}, picked: null,
     session: null, token: '', repo: 'EVAER522/877-biochem', branch: 'main',
-    auto: true, snap: null, sync: { state: 'idle', msg: '' }, _syncTimer: null, _syncing: false
+    auto: true, snap: null, sw: '', custom: '', sync: { state: 'idle', msg: '' }, _syncTimer: null, _syncing: false
   };
 
   /* ---------- utils ---------- */
@@ -174,8 +174,9 @@
     const sc = { all: '全部题', weak: '未掌握', forgot: '只刷忘记', vague: '模糊待巩固', fav: '收藏' }[f.scope];
     return { ch, kp, sc };
   }
-  function buildQueue() {
-    const f = S.filter, prog = S.rec.progress, fav = S.rec.fav;
+  function buildQueue() { return buildQueueWith(S.filter); }
+  function buildQueueWith(f) {
+    const prog = S.rec.progress, fav = S.rec.fav;
     let list = BANK.filter(q => {
       if (f.chap && q.chap !== f.chap) return false;
       if (f.kp && q.kp !== f.kp) return false;
@@ -197,6 +198,7 @@
     updateUserName(); updateTabbar();
     const v = $('view');
     if (S.tab === 'quiz') v.innerHTML = S.view === 'quiz' ? quizHTML() : S.view === 'summary' ? summaryHTML() : setupHTML();
+    if (S.tab === 'weak') v.innerHTML = weakHTML();
     if (S.tab === 'logs') v.innerHTML = logsHTML();
     if (S.tab === 'me') v.innerHTML = meHTML();
     if (S.tab === 'quiz' && S.view === 'quiz') {
@@ -208,7 +210,8 @@
     const t = $('tbTitle'), s = $('tbSub');
     if (S.tab === 'logs') { t.textContent = '刷题记录'; s.textContent = S.user ? `当前用户 · ${S.user}` : '未选择用户'; return; }
     if (S.tab === 'me') { t.textContent = '我的'; s.textContent = '账号、同步与数据'; return; }
-    if (S.view === 'quiz') { t.textContent = '刷题中'; s.textContent = `${S.idx + 1} / ${S.queue.length} · ${esc(shortName(scopeLabel().ch))}${S.filter.kp ? ' · ' + S.filter.kp : ''}`; return; }
+    if (S.tab === 'weak') { t.textContent = '薄弱考点'; s.textContent = '按小知识点统计掌握情况'; return; }
+    if (S.view === 'quiz') { t.textContent = '刷题中'; s.textContent = `${S.idx + 1} / ${S.queue.length} · ${S.custom || (esc(shortName(scopeLabel().ch)) + (S.filter.kp ? ' · ' + S.filter.kp : ''))}`; return; }
     if (S.view === 'summary') { t.textContent = '本轮完成'; s.textContent = `${S.session ? S.session.n : 0} 题`; return; }
     t.textContent = '877生化速刷';
     s.textContent = `${BANK.length} 题 · ${CHS.length} 章 · ${KPS.length} 考点`;
@@ -244,6 +247,17 @@
     ${snapCard}
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div><div class="h1" style="margin:0">搜题</div>
+        <div class="muted" style="margin-top:4px">题干、选项、答案、考点都能搜</div></div>
+      </div>
+      <div class="searchwrap">
+        <input id="sq" class="search" type="search" placeholder="关键词，如 米氏方程 / 端粒酶 / 2009年" value="${esc(S.sw)}"/>
+        ${S.sw ? '<button class="sclr" data-act="clearSearch">×</button>' : ''}
+      </div>
+      <div id="sres">${searchHTML()}</div>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
         <div><div class="h1" style="margin:0">选范围，开刷</div>
         <div class="muted" style="margin-top:4px">已掌握 ${known} 题 · 收藏 ${S.rec.fav.length} 题</div></div>
         <div class="badge pri">${cnt} 题</div>
@@ -261,6 +275,94 @@
     <div class="muted" style="margin:12px 4px;line-height:1.6">选择题直接点选项判对错；判断题选对/错；填空、名词解释、解答题的答案分 2—3 个要点遮盖，点一下显示一块。</div>`;
   }
   function shortName(n) { return n.replace(/^第[一二三四五六七八九十]+章\s*/, ''); }
+
+  /* ----- 搜题 ----- */
+  function haystack(q) {
+    return [q.stem, (q.opts || []).join(' '), q.ans, q.kp, q.kpnote, q.y + '年', q.id, q.chname].join(' ').toLowerCase();
+  }
+  const HAY = BANK.map(q => ({ q, h: haystack(q) }));
+  function searchResults() {
+    const kw = (S.sw || '').trim().toLowerCase();
+    if (!kw) return [];
+    const terms = kw.split(/\s+/).filter(Boolean);
+    return HAY.filter(x => terms.every(t => x.h.indexOf(t) >= 0)).map(x => x.q);
+  }
+  function snippet(q, kw) {
+    const s = q.stem || '';
+    const t = (kw || '').trim().toLowerCase();
+    const k = t && t.split(/\s+/)[0] ? s.toLowerCase().indexOf(t.split(/\s+/)[0]) : -1;
+    if (s.length <= 46 || k < 0) return s.length <= 46 ? s : s.slice(0, 46) + '…';
+    const st = Math.max(0, k - 12);
+    return (st ? '…' : '') + s.slice(st, st + 46) + (st + 46 < s.length ? '…' : '');
+  }
+  function searchHTML() {
+    if (!S.sw.trim()) return `<div class="muted" style="margin-top:10px">支持题干、选项、答案、考点、年份；多个词用空格分隔，需同时命中。</div>`;
+    const rs = searchResults();
+    if (!rs.length) return `<div class="muted" style="margin-top:10px">没搜到，换个词试试（如“操纵子”“β-氧化”）</div>`;
+    const show = rs.slice(0, 40);
+    return `<div class="row" style="justify-content:space-between;margin:10px 0 8px">
+      <span class="muted">命中 ${rs.length} 题${rs.length > 40 ? '（显示前 40）' : ''}</span>
+      <button class="chip on" data-act="brushRes">刷这 ${rs.length} 题</button></div>
+      <div class="slist">${show.map(q => `<button class="srow" data-act="openq" data-v="${esc(q.id)}">
+        <div class="st"><span class="sid">${q.y}·${esc(q.ty)}${esc(q.num)}</span>${esc(snippet(q, S.sw))}</div>
+        <div class="sk">${esc(shortName(q.chname))} · ${esc(q.kp)}</div></button>`).join('')}</div>`;
+  }
+
+  /* ----- 薄弱考点 ----- */
+  function kpStats() {
+    const p = S.rec.progress || {};
+    return KPS.map(k => {
+      const qs = BANK.filter(q => q.ch === k.ch && q.kp === k.kp);
+      let f = 0, v = 0, kn = 0;
+      qs.forEach(q => { const st = p[q.id]; if (!st) return; if (st.r === 'forgot') f++; else if (st.r === 'vague') v++; else if (st.r === 'known') kn++; });
+      const t = qs.length, u = t - f - v - kn;
+      const weak = t ? (f * 3 + v * 2 + u) / t : 0;
+      return { ...k, t, f, v, kn, u, weak, ids: qs.map(q => q.id) };
+    });
+  }
+  function weakHTML() {
+    const p = S.rec.progress || {};
+    const done = Object.keys(p).length;
+    if (!done) return `<div class="card" style="text-align:center;padding:26px 16px">
+      <div style="font-size:15px;color:var(--tx2)">还没有答题记录</div>
+      <div class="muted" style="margin:8px 0 16px">先刷几题，这里会按考点告诉你哪块最薄弱</div>
+      <button class="btn block" data-act="toSetup">去刷题</button></div>`;
+    let forgot = 0, vague = 0, known = 0;
+    Object.values(p).forEach(x => { if (x.r === 'forgot') forgot++; else if (x.r === 'vague') vague++; else if (x.r === 'known') known++; });
+    const rate = Math.round(known / BANK.length * 100);
+    const st = kpStats().filter(k => k.t).sort((a, b) => b.weak - a.weak);
+    const top = st.filter(k => k.weak > 0).slice(0, 20);
+    const chapName = id => shortName(((CHS.find(c => c.id === id)) || {}).name || id);
+    const rows = top.map((k, i) => {
+      const wf = Math.round(k.f / k.t * 100), wv = Math.round(k.v / k.t * 100), wk = Math.round(k.kn / k.t * 100);
+      return `<div class="wrow">
+        <div class="whead"><div class="wname">${i < 3 ? '<span class="wtag">重点</span>' : ''}${esc(k.kp)}</div>
+          <button class="chip" data-act="weakKp" data-v="${esc(k.ch)}|${esc(k.kp)}">刷</button></div>
+        <div class="wmeta">${esc(chapName(k.ch))} · 共 ${k.t} 题 · 忘 ${k.f} · 模 ${k.v} · 熟 ${k.kn}${k.u ? ' · 未练 ' + k.u : ''}</div>
+        <div class="wbar"><i style="width:${wf}%;background:var(--forgot)"></i><i style="width:${wv}%;background:var(--vague)"></i><i style="width:${wk}%;background:var(--pri)"></i></div>
+      </div>`;
+    }).join('');
+    return `<div class="card">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div><div class="h1" style="margin:0">整体掌握</div>
+        <div class="muted" style="margin-top:4px">已练 ${done} / ${BANK.length} 题 · 熟悉 ${known} 题</div></div>
+        <div class="badge pri">${rate}%</div>
+      </div>
+      <div class="progress" style="margin-top:12px;height:6px;background:#eef1f4"><i style="width:${rate}%"></i></div>
+      <div class="row wrap" style="margin-top:12px;gap:6px">
+        <span class="badge" style="background:#fdeee7;color:var(--forgot)">忘记 ${forgot}</span>
+        <span class="badge" style="background:#fdf3e3;color:var(--vague)">模糊 ${vague}</span>
+        <button class="badge" style="background:var(--pri-weak);color:var(--pri)" data-act="weakForgot">只刷忘记的 ${forgot} 题 ›</button>
+      </div>
+      <div class="row" style="margin-top:14px;gap:8px">
+        <button class="btn" style="flex:1" data-act="weakAll">刷全部未掌握</button>
+        <button class="btn ghost" style="flex:1" data-act="toSetup">换范围</button>
+      </div>
+    </div>
+    <div class="section-label">最薄弱的考点（${top.length}）</div>
+    <div class="card wlist">${rows || '<div class="empty">各考点都挺稳，继续刷新题吧</div>'}</div>
+    <div class="muted" style="margin:10px 4px;line-height:1.7">条形：橙=忘记，黄=模糊，绿=熟悉，灰=未练；按“忘记×3＋模糊×2＋未练×1”排序，所以最上面就是你最该补的。</div>`;
+  }
 
   /* ----- quiz ----- */
   function quizHTML() {
@@ -437,8 +539,18 @@
   function startSession() {
     S.queue = buildQueue();
     if (!S.queue.length) { toast('这个范围没有题目'); return; }
-    S.idx = 0; S.phase = 'ask'; S.revealed = {}; S.picked = null; S.rated = null;
-    S.session = { t: now(), scope: scopeLabel().ch + ' · ' + scopeLabel().kp + ' · ' + scopeLabel().sc, n: 0, forgot: 0, vague: 0, known: 0, correct: 0, wrong: 0 };
+    launch(0);
+  }
+  function startCustom(list, idx, label) {
+    if (!list.length) { toast('没有题目'); return; }
+    S.queue = list;
+    launch(Math.max(0, Math.min(idx || 0, list.length - 1)), label);
+  }
+  function launch(idx, label) {
+    S.custom = label || '';
+    S.idx = idx; S.phase = 'ask'; S.revealed = {}; S.picked = null; S.rated = null; S.correctFlag = null;
+    const lb = label ? { ch: label, kp: '', sc: '' } : scopeLabel();
+    S.session = { t: now(), scope: label || (lb.ch + ' · ' + lb.kp + ' · ' + lb.sc), n: 0, forgot: 0, vague: 0, known: 0, correct: 0, wrong: 0 };
     S.view = 'quiz'; S.tab = 'quiz'; render(); saveSess();
   }
   function resumeSession() {
@@ -449,6 +561,7 @@
     if (!list.length) { clearSess(); toast('上次的题目已失效'); render(); return; }
     S.filter = Object.assign({ chap: '', kp: '', scope: 'all', order: 'seq' }, s.filter || {});
     S.queue = list;
+    S.custom = '';
     S.idx = Math.min(s.idx || 0, list.length - 1);
     S.phase = 'ask'; S.revealed = {}; S.picked = null; S.rated = null; S.correctFlag = null;
     const lb = scopeLabel();
@@ -495,6 +608,29 @@
         case 'scope': S.filter.scope = v; render(); return;
         case 'order': S.filter.order = v; render(); return;
         case 'start': startSession(); return;
+        case 'clearSearch': S.sw = ''; render(); return;
+        case 'brushRes': {
+          const rs = searchResults();
+          startCustom(rs, 0, '搜索：' + S.sw.trim() + '（' + rs.length + '题）'); return;
+        }
+        case 'openq': {
+          const rs = searchResults();
+          const i = rs.findIndex(q => q.id === v);
+          startCustom(rs, i < 0 ? 0 : i, '搜索：' + S.sw.trim() + '（' + rs.length + '题）'); return;
+        }
+        case 'weakKp': {
+          const [ch, kp] = String(v || '').split('|');
+          const list = BANK.filter(q => q.ch === ch && q.kp === kp && (!S.rec.progress[q.id] || S.rec.progress[q.id].r !== 'known'));
+          startCustom(list, 0, shortName(((CHS.find(c => c.id === ch)) || {}).name || '') + ' · ' + kp + ' · 待巩固'); return;
+        }
+        case 'weakAll': {
+          const list = buildQueueWith({ chap: '', kp: '', scope: 'weak', order: 'seq' });
+          startCustom(list, 0, '全部未掌握'); return;
+        }
+        case 'weakForgot': {
+          const list = buildQueueWith({ chap: '', kp: '', scope: 'forgot', order: 'seq' });
+          startCustom(list, 0, '只刷忘记的题'); return;
+        }
         case 'resume': resumeSession(); return;
         case 'dropSess': clearSess(); render(); toast('已放弃上次进度'); return;
         case 'opt': {
@@ -531,7 +667,7 @@
         case 'next': case 'skip': next(); return;
         case 'prev': if (S.idx > 0) { S.idx--; S.phase = 'ask'; S.revealed = {}; S.picked = null; S.rated = null; render(); } return;
         case 'again': S.view = 'quiz'; S.queue = buildQueue(); S.idx = 0; S.session = { t: now(), scope: scopeLabel().ch + ' · ' + scopeLabel().kp + ' · ' + scopeLabel().sc, n: 0, forgot: 0, vague: 0, known: 0, correct: 0, wrong: 0 }; S.phase = 'ask'; render(); return;
-        case 'toSetup': S.view = 'setup'; render(); return;
+        case 'toSetup': S.view = 'setup'; S.tab = 'quiz'; render(); return;
         case 'syncNow': if (!S.token) { tokenSheet(); return; } toast('同步中…'); await pushToRepo(); render(); return;
         case 'switchUser': userSheet(); return;
         case 'pickUser': setUser(v); closeSheet(); return;
@@ -576,6 +712,12 @@
         } catch (err) { toast('导入失败：' + err.message); }
       };
       rd.readAsText(f);
+    }
+  });
+  document.addEventListener('input', e => {
+    if (e.target && e.target.id === 'sq') {
+      S.sw = e.target.value;
+      const box = $('sres'); if (box) box.innerHTML = searchHTML();
     }
   });
   document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {

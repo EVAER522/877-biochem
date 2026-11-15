@@ -297,3 +297,11 @@ main{padding:12px 14px 8px}
 .rkbar i.forgot{background:#f0743a}.rkbar i.vague{background:#f0a020}.rkbar i.known{background:var(--pri)}
 .rkpct{font-size:11px;width:26px;text-align:right;flex:none}
 .rkpct.forgot{color:#b3441a}.rkpct.vague{color:#9a6212}.rkpct.known{color:var(--pri);font-weight:600}
+
+/* 背名词排序栏 */
+.sortbar{display:flex;align-items:center;gap:6px;margin:0 0 6px}
+.slab{font-size:11px;color:var(--tx3);flex:none;margin-right:2px}
+.chip.sm{padding:5px 11px;font-size:12px}
+.dirbtn{width:30px;height:28px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--tx2);font-size:14px;line-height:1;flex:none;margin-left:auto}
+.dirbtn:active{background:#f2f6f4}
+.sortstat{font-size:10.5px;color:var(--tx3);display:flex;align-items:center;gap:5px;margin:0 0 12px}

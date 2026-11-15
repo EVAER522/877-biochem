@@ -720,6 +720,23 @@
       if (mf === 'known') return r === 'known';
       return true;
     });
+    const by = S.msort || 'default';
+    if (by !== 'default') {
+      const dir = S.mdir === 1 ? 1 : -1;
+      const base = new Map(gs.map((g, i) => [g.key, i]));
+      const prof = g => { const r = S.mem[g.key] && S.mem[g.key].r; return r === 'known' ? 2 : r === 'vague' ? 1 : r === 'forgot' ? 0 : null; };
+      list = list.slice().sort((a, b) => {
+        let x, y;
+        if (by === 'freq') { x = a.items.length; y = b.items.length; }
+        else {
+          const pa = prof(a), pb = prof(b);
+          if (pa === null && pb !== null) return 1;      // 未标记恒定垫底
+          if (pb === null && pa !== null) return -1;
+          x = pa === null ? 0 : pa; y = pb === null ? 0 : pb;
+        }
+        return (x - y) * dir || (b.items.length - a.items.length) || (base.get(a.key) - base.get(b.key));
+      });
+    }
     if (!list.length) return `<div class="muted" style="padding:20px 4px;text-align:center">没有匹配的词条</div>`;
     return list.map(memCard).join('');
   }
@@ -737,17 +754,13 @@
           ${S.mw ? '<button class="sclr" data-act="memoClear">×</button>' : ''}
         </div>
       </div>
-      <div class="rankcard">
-        <div class="rankhead"><b>熟练度排行</b>
-          <span class="rankstat"><i class="agdot known"></i>熟悉 ${ms.st.known} <i class="agdot vague"></i>模糊 ${ms.st.vague} <i class="agdot forgot"></i>忘记 ${ms.st.forgot} <i class="agdot"></i>未标 ${ms.st.none}</span>
-        </div>
-        ${ms.rated.length ? `<div class="ranklist">${ms.rated.slice(0, 8).map((x, i) => `<button class="rankrow" data-act="memoOpen" data-v="${x.g.idx}">
-          <span class="rkno ${i < 3 ? 'top' : ''}">${i + 1}</span>
-          <span class="rkterm">${esc(x.g.zh)}</span>
-          <span class="rkbar"><i class="${x.r}" style="width:${x.score}%"></i></span>
-          <span class="rkpct ${x.r}">${x.score}</span></button>`).join('')}</div>`
-      : `<div class="muted" style="padding:10px 0">还没有标记，展开词条点「忘记/模糊/熟悉」，这里会按熟练度自动排名</div>`}
+      <div class="sortbar">
+        <span class="slab">排序</span>
+        ${[['default', '默认'], ['freq', '考频'], ['prof', '熟练度']].map(([k, t]) =>
+        `<button class="chip sm ${(S.msort || 'default') === k ? 'on' : ''}" data-act="memSort" data-v="${k}">${t}</button>`).join('')}
+        <button class="dirbtn" data-act="memDir" title="切换升降序">${S.mdir === 1 ? '↑' : '↓'}</button>
       </div>
+      <div class="sortstat"><i class="agdot known"></i>熟悉 ${ms.st.known} <i class="agdot vague"></i>模糊 ${ms.st.vague} <i class="agdot forgot"></i>忘记 ${ms.st.forgot} <i class="agdot"></i>未标 ${ms.st.none}</div>
       <div class="row wrap" style="margin:0 0 10px">
         ${[['all', '全部 ' + gs.length], ['weak', '薄弱 ' + (ms.st.forgot + ms.st.vague)], ['none', '未标 ' + ms.st.none], ['known', '熟悉 ' + ms.st.known]].map(([k, t]) =>
         `<button class="chip ${S.mf === k ? 'on' : ''}" data-act="memFilter" data-v="${k}">${t}</button>`).join('')}
@@ -884,6 +897,8 @@
         case 'memo': S.view = 'memo'; S.tab = 'quiz'; render(); return;
         case 'memoOpen': { const g = memoGroups()[v]; if (!g) return; S.mo[g.key] = !S.mo[g.key]; render(); return; }
         case 'memFilter': S.mf = v; render(); return;
+        case 'memSort': S.msort = v; render(); return;
+        case 'memDir': S.mdir = S.mdir === 1 ? -1 : 1; render(); return;
         case 'memoRate': {
           const g = memoGroups()[v]; if (!g) return;
           const cur = S.mem[g.key];

@@ -5,7 +5,7 @@
   const KPS = window.KPS || [];
   const LS = {
     users: 'qb.users', cur: 'qb.cur', token: 'qb.token', repo: 'qb.repo', branch: 'qb.branch',
-    auto: 'qb.auto', rec: u => 'qb.rec.' + u, sess: u => 'qb.sess.' + u
+    auto: 'qb.auto', rec: u => 'qb.rec.' + u, sess: u => 'qb.sess.' + u, mem: u => 'qb.mem.' + u
   };
   const COLORS = ['#0f766e', '#9a3412', '#4338ca'];
   const RATE_TXT = { forgot: '忘记', vague: '模糊', known: '熟悉' };
@@ -14,7 +14,7 @@
   const S = {
     user: '', rec: { u: '', updated: 0, progress: {}, fav: [], sessions: [] }, tab: 'quiz', view: 'setup',
     filter: { tp: '', chap: '', kp: '', scope: 'all', order: 'seq' },
-    fold: { tp: true, chap: true, kp: true }, mo: {}, mo2: {}, mw: '',
+    fold: { tp: true, chap: true, kp: true }, mo: {}, mo2: {}, mw: '', mem: {}, mf: 'all',
     queue: [], idx: 0, phase: 'ask', revealed: {}, picked: null,
     session: null, token: '', repo: 'EVAER522/877-biochem', branch: 'main',
     auto: true, snap: null, sw: '', custom: '', listKind: 'fav', syncAt: 0, syncErr: '', sync: { state: 'idle', msg: '' }, _syncTimer: null, _syncing: false
@@ -74,9 +74,11 @@
       const bad = loadJSON(LS.rec('"' + u + '"'), null);
       if (bad) { r = bad; saveJSON(LS.rec(u), r); localStorage.removeItem(LS.rec('"' + u + '"')); }
     }
+    S.mem = loadJSON(LS.mem(u), {}) || {};
     S.rec = r || blankRec(u);
     S.rec.fav = S.rec.fav || []; S.rec.progress = S.rec.progress || {}; S.rec.sessions = S.rec.sessions || [];
   }
+  function saveMem() { if (S.user) saveJSON(LS.mem(S.user), S.mem); }
   function saveRec() {
     S.rec.updated = now();
     saveJSON(LS.rec(S.user), S.rec);
@@ -300,9 +302,11 @@
       <button class="qcard" data-act="memo">
         <div class="qt">背名词解释</div>
         <div class="qn">${memoN}<span>词条</span></div>
+        <div class="qn sub">熟悉 ${memStat().st.known} · 薄弱 ${memStat().st.forgot + memStat().st.vague}</div>
       </button>
       <button class="qcard" data-act="searchSheet">
         <div class="qt">搜题</div>
+        <div class="qn">${BANK.length}<span>题</span></div>
         <div class="qn sub">题干 · 答案 · 考点</div>
       </button>
     </div>
@@ -665,6 +669,19 @@
     arr.forEach((g, i) => { g.idx = i; });
     S._memo = arr; return arr;
   }
+  function memStat() {
+    const gs = memoGroups();
+    const st = { known: 0, vague: 0, forgot: 0, none: 0 };
+    const rows = gs.map(g => {
+      const it = S.mem[g.key] || null;
+      const r = it && it.r;
+      if (r === 'known') st.known++; else if (r === 'vague') st.vague++; else if (r === 'forgot') st.forgot++; else st.none++;
+      const score = r === 'known' ? 100 : r === 'vague' ? 50 : r === 'forgot' ? 0 : null;
+      return { g, r, score, ts: it && it.ts || 0 };
+    });
+    const rated = rows.filter(x => x.score !== null).sort((a, b) => b.score - a.score || b.ts - a.ts);
+    return { rows, st, rated };
+  }
   function memCard(g) {
     const open = !!S.mo[g.key], open2 = !!S.mo2[g.key];
     const ansMain = g.ansVars[0] || '';
@@ -677,6 +694,11 @@
         </div>
         <i class="caret ${open ? 'open' : ''}">▾</i>
       </button>
+      <div class="mrate">
+        <span class="mrlab">熟练度</span>
+        ${['forgot', 'vague', 'known'].map(k => `<button class="mbtn ${S.mem[g.key] && S.mem[g.key].r === k ? 'on ' + k : ''}" data-act="memoRate" data-v="${g.idx}" data-r="${k}">${RATE_TXT[k]}</button>`).join('')}
+        ${S.mem[g.key] ? '<span class="mrtime">' + new Date(S.mem[g.key].ts).toLocaleDateString('zh-CN') + '</span>' : '<span class="mrtime">未标记</span>'}
+      </div>
       ${open ? `<div class="mans"><div class="mstrike">答案</div><p>${esc(ansMain)}</p>
         ${others.map(o => `<p class="mvar">另有表述：${esc(o)}</p>`).join('')}</div>` : ''}
       ${open ? `<button class="mhead2" data-act="memoOpen2" data-v="${g.idx}">
@@ -689,14 +711,22 @@
   }
   function memListHTML() {
     const gs = memoGroups(); const kw = (S.mw || '').trim().toLowerCase();
-    const list = kw ? gs.filter(g => (g.zh + ' ' + g.en + ' ' + g.ansVars.join(' ')).toLowerCase().indexOf(kw) >= 0) : gs;
+    let list = kw ? gs.filter(g => (g.zh + ' ' + g.en + ' ' + g.ansVars.join(' ')).toLowerCase().indexOf(kw) >= 0) : gs;
+    const mf = S.mf || 'all';
+    if (mf !== 'all') list = list.filter(g => {
+      const r = S.mem[g.key] && S.mem[g.key].r;
+      if (mf === 'weak') return r === 'forgot' || r === 'vague';
+      if (mf === 'none') return !r;
+      if (mf === 'known') return r === 'known';
+      return true;
+    });
     if (!list.length) return `<div class="muted" style="padding:20px 4px;text-align:center">没有匹配的词条</div>`;
     return list.map(memCard).join('');
   }
   function memHTML() {
-    const gs = memoGroups();
+    const gs = memoGroups(); const ms = memStat();
     return `<div class="backrow"><button class="backbtn" data-act="home">‹ 首页</button>
-      <span class="bk-sub">点开看答案</span>
+      <span class="bk-sub">点开看答案 · 可标熟练度</span>
       <button class="backbtn" style="margin-left:auto;white-space:nowrap" data-act="memoToggleAll">${Object.keys(S.mo).length ? '全部收起' : '全部展开'}</button></div>
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:flex-start">
@@ -706,6 +736,21 @@
           <input id="mq" class="search" type="search" placeholder="搜词条名或答案，如 信号肽 / 操纵子" value="${esc(S.mw)}"/>
           ${S.mw ? '<button class="sclr" data-act="memoClear">×</button>' : ''}
         </div>
+      </div>
+      <div class="rankcard">
+        <div class="rankhead"><b>熟练度排行</b>
+          <span class="rankstat"><i class="agdot known"></i>熟悉 ${ms.st.known} <i class="agdot vague"></i>模糊 ${ms.st.vague} <i class="agdot forgot"></i>忘记 ${ms.st.forgot} <i class="agdot"></i>未标 ${ms.st.none}</span>
+        </div>
+        ${ms.rated.length ? `<div class="ranklist">${ms.rated.slice(0, 8).map((x, i) => `<button class="rankrow" data-act="memoOpen" data-v="${x.g.idx}">
+          <span class="rkno ${i < 3 ? 'top' : ''}">${i + 1}</span>
+          <span class="rkterm">${esc(x.g.zh)}</span>
+          <span class="rkbar"><i class="${x.r}" style="width:${x.score}%"></i></span>
+          <span class="rkpct ${x.r}">${x.score}</span></button>`).join('')}</div>`
+      : `<div class="muted" style="padding:10px 0">还没有标记，展开词条点「忘记/模糊/熟悉」，这里会按熟练度自动排名</div>`}
+      </div>
+      <div class="row wrap" style="margin:0 0 10px">
+        ${[['all', '全部 ' + gs.length], ['weak', '薄弱 ' + (ms.st.forgot + ms.st.vague)], ['none', '未标 ' + ms.st.none], ['known', '熟悉 ' + ms.st.known]].map(([k, t]) =>
+        `<button class="chip ${S.mf === k ? 'on' : ''}" data-act="memFilter" data-v="${k}">${t}</button>`).join('')}
       </div>
       <div id="mlist">${memListHTML()}</div>`;
   }
@@ -824,7 +869,7 @@
   document.addEventListener('click', async e => {
     const el = e.target.closest('[data-act]');
     if (el) {
-      const act = el.dataset.act, v = el.dataset.v, i = el.dataset.i;
+      const act = el.dataset.act, v = el.dataset.v, i = el.dataset.i, r = el.dataset.r;
       switch (act) {
         case 'fold': S.fold[v] = !S.fold[v]; render(); return;
         case 'tp': S.filter.tp = v; S.filter.chap = ''; S.filter.kp = ''; render(); return;
@@ -838,6 +883,13 @@
         case 'searchSheet': searchSheet(); return;
         case 'memo': S.view = 'memo'; S.tab = 'quiz'; render(); return;
         case 'memoOpen': { const g = memoGroups()[v]; if (!g) return; S.mo[g.key] = !S.mo[g.key]; render(); return; }
+        case 'memFilter': S.mf = v; render(); return;
+        case 'memoRate': {
+          const g = memoGroups()[v]; if (!g) return;
+          const cur = S.mem[g.key];
+          if (cur && cur.r === r) delete S.mem[g.key]; else S.mem[g.key] = { r, ts: Date.now() };
+          saveMem(); render(); return;
+        }
         case 'memoOpen2': { const g = memoGroups()[v]; if (!g) return; S.mo2[g.key] = !S.mo2[g.key]; render(); return; }
         case 'memoClear': S.mw = ''; render(); return;
         case 'memoToggleAll': { const gs = memoGroups(); if (Object.keys(S.mo).length) { S.mo = {}; S.mo2 = {}; } else { gs.forEach(g => S.mo[g.key] = true); } render(); return; }

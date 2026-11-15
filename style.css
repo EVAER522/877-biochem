@@ -180,7 +180,7 @@ main{padding:12px 14px 8px}
 .aglegend{display:flex;gap:10px;font-size:11px;color:var(--tx3)}
 .agdot{display:inline-block;width:8px;height:8px;border-radius:3px;background:#e6e8eb;margin-right:3px}
 .agdot.forgot{background:#f0743a}.agdot.vague{background:#f0a020}.agdot.known{background:var(--pri)}
-.aggrid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;max-height:46vh;overflow-auto;padding:2px}
+.aggrid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;padding:2px}
 .agnum{position:relative;height:38px;border:1px solid var(--line);border-radius:9px;background:#fff;font-size:13px;color:var(--tx2)}
 .agnum.known{background:#eaf7f1;border-color:#bfe3d4;color:#0f766e}
 .agnum.vague{background:#fdf4e5;border-color:#f5ddb8;color:#9a6212}

@@ -70,7 +70,7 @@
     if (typeof f.a === 'string') q.ans = f.a.indexOf('｜考点') >= 0 ? f.a : (f.a + (q.kp ? '｜考点：' + q.kp : ''));
     if (Array.isArray(f.pts)) q.pts = f.pts.slice();
   }
-  function applyFixes() { (window.QBANK || []).forEach(applyFix); S._memo = null; }
+  function applyFixes() { (window.QBANK || []).forEach(applyFix); S._memo = null; if (typeof rebuildHay === 'function') rebuildHay(); }
   /* 先用本机缓存（0 网络、0 等待），再后台拉最新；不阻塞首屏 */
   function applyFixesCache() {
     FIXES = loadJSON('qb.fixes', null) || {};
@@ -431,15 +431,18 @@
   function shortName(n) { return n.replace(/^第[一二三四五六七八九十]+章\s*/, ''); }
 
   /* ----- 搜题 ----- */
+  const normTxt = t => String(t == null ? '' : t).toLowerCase().replace(/[\s\u3000]+/g, '');
   function haystack(q) {
-    return [q.stem, (q.opts || []).join(' '), q.ans, q.kp, q.kpnote, q.y + '年', q.id, q.chname].join(' ').toLowerCase();
+    return normTxt([q.stem, (q.opts || []).join(' '), q.ans, q.kp, q.kpnote, q.y + '年', q.id, q.chname].join(' '));
   }
-  const HAY = BANK.map(q => ({ q, h: haystack(q) }));
+  let HAY = [];
+  function rebuildHay() { HAY = BANK.map(q => ({ q, h: haystack(q) })); }
+  rebuildHay();
   function searchResults() {
-    const kw = (S.sw || '').trim().toLowerCase();
+    const kw = normTxt(S.sw);
     if (!kw) return [];
-    const terms = kw.split(/\s+/).filter(Boolean);
-    return HAY.filter(x => terms.every(t => x.h.indexOf(t) >= 0)).map(x => x.q);
+    const terms = String(S.sw || '').toLowerCase().split(/[\s\u3000]+/).map(normTxt).filter(Boolean);
+    return HAY.filter(x => (kw && x.h.indexOf(kw) >= 0) || terms.every(t => x.h.indexOf(t) >= 0)).map(x => x.q);
   }
   function snippet(q, kw) {
     const s = q.stem || '';

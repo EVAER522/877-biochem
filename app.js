@@ -162,6 +162,8 @@
     const path = `logs/${encodeURIComponent(S.user)}.json`;
     try {
       const cur = await api.read(path);
+      // 推送前先与远端合并，避免旧设备用空数据覆盖别的设备的收藏/熟练度/断点
+      if (cur && cur.text) { try { S.rec = mergeRec(S.rec, JSON.parse(cur.text)); saveJSON(LS.rec(S.user), S.rec); } catch (e) { } }
       const body = JSON.stringify(S.rec, null, 0);
       if (cur && cur.text === body) { setSync('ok', '已同步 ' + hhmm(now())); S._syncing = false; return; }
       await api.write(path, body, `log: ${S.user} ${new Date().toISOString().slice(0, 16)}`, cur && cur.sha);

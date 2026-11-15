@@ -124,7 +124,7 @@
     out.favTs = { ...(remote.favTs || {}) }; Object.entries(local.favTs || {}).forEach(([k, v]) => { if ((v || 0) > (out.favTs[k] || 0)) out.favTs[k] = v; });
     out.favDel = { ...(remote.favDel || {}) }; Object.entries(local.favDel || {}).forEach(([k, v]) => { if ((v || 0) > (out.favDel[k] || 0)) out.favDel[k] = v; });
     out.fav = Array.from(new Set([...(local.fav || []), ...(remote.fav || [])]))
-      .filter(id => (out.favTs[id] || 0) > (out.favDel[id] || 0));
+      .filter(id => !(out.favDel[id] && out.favDel[id] > (out.favTs[id] || 0)));   // 只有“删除时间晚于收藏时间”才删；老数据无收藏时间时保留
     out.progress = { ...(remote.progress || {}) };
     Object.entries(local.progress || {}).forEach(([k, v]) => {
       const r = out.progress[k];

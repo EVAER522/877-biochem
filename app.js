@@ -276,8 +276,64 @@
         <button class="btn ghost" style="flex:1" data-act="dropSess">不继续</button>
       </div>
     </div>` : '';
+    const doneN = Object.keys(p).length;
+    const forgotN = Object.values(p).filter(x => x.r === 'forgot').length;
+    const pct = Math.round(doneN / BANK.length * 100);
+    const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+    const todayN = Object.values(p).filter(x => x.ts && new Date(x.ts) >= d0).length;
+    const memoN = memoGroups().length;
+    const tiles = [['fav', '收藏', '#b45309'], ['forgot', '忘记', '#c2410c'], ['vague', '模糊', '#b45309'], ['known', '熟悉', '#0f766e'], ['weak', '未掌握', '#5b636e']];
     return `
+    <div class="hero">
+      <div class="hero-row">
+        <div><div class="hero-t">生物化学 · 刷题台</div><div class="hero-s">${BANK.length - known} 题未掌握 · 今日已练 ${todayN} 题</div></div>
+        <div class="hero-ring" style="--p:${pct}"><b>${pct}%</b><span>已练</span></div>
+      </div>
+      <div class="hstats">
+        <button class="hstat" data-act="listOpen" data-v="done"><b>${doneN}</b><span>已练</span></button>
+        <button class="hstat" data-act="listOpen" data-v="fav"><b>${S.rec.fav.length}</b><span>收藏</span></button>
+        <button class="hstat" data-act="listOpen" data-v="known"><b>${known}</b><span>熟悉</span></button>
+        <button class="hstat warn" data-act="listOpen" data-v="forgot"><b>${forgotN}</b><span>待复盘</span></button>
+      </div>
+    </div>
     ${snapCard}
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+        <div><div class="h1" style="margin:0">选范围</div>
+        <div class="muted" style="margin-top:4px">题型、章节、考点可叠加，选完直接开刷</div></div>
+        <div class="badge pri">${cnt} 题</div>
+      </div>
+      <div class="filterset">
+        ${foldHead('tp', '按题型', f.tp || '全部')}
+        ${S.fold.tp ? '' : `<div class="foldbody">${tpChips}</div>`}
+        ${foldHead('chap', '按章节', chName)}
+        ${S.fold.chap ? '' : `<div class="foldbody">${chapChips}</div>`}
+        ${foldHead('kp', '按考点', f.chap ? (f.kp || '全部考点') : '先选章节')}
+        ${S.fold.kp || !f.chap ? '' : `<div class="foldbody">${kpChips}</div>`}
+      </div>
+      <div class="section-label">掌握程度</div>
+      <div class="row wrap">${scopeChips}</div>
+      <div class="section-label">出题顺序</div>
+      <div class="seg">
+        <button class="segbtn ${f.order === 'seq' ? 'on' : ''}" data-act="order" data-v="seq">按年份</button>
+        <button class="segbtn ${f.order === 'random' ? 'on' : ''}" data-act="order" data-v="random">随机</button>
+      </div>
+      <button class="btn block ctabtn" data-act="start" ${cnt ? '' : 'disabled style="opacity:.45"'}>开始刷题（${cnt}）</button>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div><div class="h1" style="margin:0">我的题单</div>
+        <div class="muted" style="margin-top:4px">点进任意清单，按清单直接刷</div></div>
+      </div>
+      <div class="tiles">
+        ${tiles.map(([k, n, c]) => `<button class="tile" data-act="listOpen" data-v="${k}" style="--c:${c}"><b>${listQueue(k).length}</b><span>${n}</span></button>`).join('')}
+      </div>
+      <button class="memoentry" data-act="memo">
+        <div><div class="me-t">背名词解释 <span class="me-n">${memoN} 词条</span></div>
+        <div class="muted" style="margin-top:3px">121 道真题按词条去重，点开即看答案与历年原题，不计入进度</div></div>
+        <span class="me-go">去背 ›</span>
+      </button>
+    </div>
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:flex-start">
         <div><div class="h1" style="margin:0">搜题</div>
@@ -289,39 +345,7 @@
       </div>
       <div id="sres">${searchHTML()}</div>
     </div>
-    <div class="card">
-      <div class="row" style="justify-content:space-between;align-items:flex-start">
-        <div><div class="h1" style="margin:0">选范围，开刷</div>
-        <div class="muted" style="margin-top:4px">已掌握 ${known} 题 · 收藏 ${S.rec.fav.length} 题</div></div>
-        <div class="badge pri">${cnt} 题</div>
-      </div>
-      <button class="memoentry" data-act="memo">
-        <div><div class="h1" style="margin:0">背名词解释</div>
-        <div class="muted" style="margin-top:4px">${memoGroups().length} 个词条 · 121 道真题 · 点开即看答案，不计入答题进度</div></div>
-        <span class="badge pri">去背 ›</span>
-      </button>
-      <div class="section-label">我的题单</div>
-      <div class="row wrap">
-        ${[['fav', '收藏'], ['forgot', '忘记'], ['vague', '模糊'], ['known', '熟悉'], ['weak', '未掌握']].map(([k, n]) =>
-      `<button class="chip" data-act="listOpen" data-v="${k}">${n}<span class="n">${listQueue(k).length}</span></button>`).join('')}
-      </div>
-      <div style="margin-top:14px">
-        ${foldHead('tp', '按题型', f.tp || '全部')}
-        ${S.fold.tp ? '' : `<div class="row wrap" style="margin:10px 0 4px">${tpChips}</div>`}
-        ${foldHead('chap', '按章节', chName)}
-        ${S.fold.chap ? '' : `<div class="row wrap" style="margin:10px 0 4px">${chapChips}</div>`}
-        ${foldHead('kp', '按考点', f.chap ? (f.kp || '全部考点') : '先选章节')}
-        ${S.fold.kp || !f.chap ? '' : `<div class="row wrap" style="margin:10px 0 4px">${kpChips}</div>`}
-      </div>
-      <div class="section-label">范围</div><div class="row wrap">${scopeChips}</div>
-      <div class="section-label">顺序</div>
-      <div class="row wrap">
-        <button class="chip ${f.order === 'seq' ? 'on' : ''}" data-act="order" data-v="seq">按年份顺序</button>
-        <button class="chip ${f.order === 'random' ? 'on' : ''}" data-act="order" data-v="random">随机</button>
-      </div>
-      <div style="margin-top:18px"><button class="btn block" data-act="start" ${cnt ? '' : 'disabled style="opacity:.4"'}>开始刷题（${cnt}）</button></div>
-    </div>
-    <div class="muted" style="margin:12px 4px;line-height:1.6">选择题直接点选项判对错；判断题选对/错；填空、名词解释、解答题的答案分 2—3 个要点遮盖，点一下显示一块。</div>`;
+    <div class="hintline">选择题点选项即判；判断题选对/错；填空与主观题答案分要点遮盖，点一下显示一块。</div>`;
   }
   function shortName(n) { return n.replace(/^第[一二三四五六七八九十]+章\s*/, ''); }
 

@@ -13,7 +13,7 @@
 
   const S = {
     user: '', rec: { u: '', updated: 0, progress: {}, fav: [], sessions: [] }, tab: 'quiz', view: 'setup',
-    filter: { chap: '', kp: '', scope: 'all', order: 'seq' },
+    filter: { tp: '', chap: '', kp: '', scope: 'all', order: 'seq' },
     queue: [], idx: 0, phase: 'ask', revealed: {}, picked: null,
     session: null, token: '', repo: 'EVAER522/877-biochem', branch: 'main',
     auto: true, snap: null, sw: '', custom: '', listKind: 'fav', syncAt: 0, syncErr: '', sync: { state: 'idle', msg: '' }, _syncTimer: null, _syncing: false
@@ -82,7 +82,7 @@
     scheduleSync();
   }
   function saveSess() {
-    if (!S.user || S.view !== 'quiz' || !S.queue || !S.queue.length) return;
+    if (!S.user || S.ephemeral || S.view !== 'quiz' || !S.queue || !S.queue.length) return;
     saveJSON(LS.sess(S.user), { t: now(), filter: { ...S.filter }, idx: S.idx, ids: S.queue.map(q => q.id) });
   }
   function clearSess() { if (S.user) localStorage.removeItem(LS.sess(S.user)); S.snap = null; }
@@ -180,17 +180,27 @@
   function updateUserName() { const el = $('userName'); if (el) el.textContent = S.user || '未选择'; }
 
   /* ---------- filtering ---------- */
+  function tpGroup(q) {
+    const t = q.ty || '';
+    if (t.indexOf('名词') === 0) return '名词';
+    if (t.indexOf('问答') === 0 || t.indexOf('简答') === 0 || t.indexOf('计算') === 0 || t.indexOf('论述') === 0) return '大题';
+    if (t.indexOf('选择') === 0 || t.indexOf('单选') === 0 || t.indexOf('多选') === 0) return '选择';
+    if (t.indexOf('判断') === 0) return '判断';
+    if (t.indexOf('填空') === 0) return '填空';
+    return '其他';
+  }
   function scopeLabel() {
     const f = S.filter;
     const ch = f.chap ? (CHS.find(c => c.id === f.chap) || {}).name : '全部章节';
     const kp = f.kp ? f.kp : '全部考点';
     const sc = { all: '全部题', weak: '未掌握', forgot: '只刷忘记', vague: '模糊待巩固', fav: '收藏' }[f.scope];
-    return { ch, kp, sc };
+    return { ch, kp, sc, tp: f.tp };
   }
   function buildQueue() { return buildQueueWith(S.filter); }
   function buildQueueWith(f) {
     const prog = S.rec.progress, fav = S.rec.fav;
     let list = BANK.filter(q => {
+      if (f.tp && tpGroup(q) !== f.tp) return false;
       if (f.chap && q.chap !== f.chap) return false;
       if (f.kp && q.kp !== f.kp) return false;
       const st = prog[q.id];
@@ -224,7 +234,7 @@
     if (S.tab === 'logs') { t.textContent = '刷题记录'; s.textContent = S.user ? `当前用户 · ${S.user}` : '未选择用户'; return; }
     if (S.tab === 'me') { t.textContent = '我的'; s.textContent = '账号、同步与数据'; return; }
     if (S.tab === 'weak') { t.textContent = '薄弱考点'; s.textContent = '按小知识点统计掌握情况'; return; }
-    if (S.view === 'quiz') { t.textContent = '刷题中'; s.textContent = `${S.idx + 1} / ${S.queue.length} · ${S.custom || (esc(shortName(scopeLabel().ch)) + (S.filter.kp ? ' · ' + S.filter.kp : ''))}`; return; }
+    if (S.view === 'quiz') { t.textContent = '刷题中'; s.textContent = `${S.idx + 1} / ${S.queue.length} · ${S.custom || ((S.filter.tp ? S.filter.tp + ' · ' : '') + esc(shortName(scopeLabel().ch)) + (S.filter.kp ? ' · ' + S.filter.kp : ''))}`; return; }
     if (S.view === 'lists') { const c = listQueue(S.listKind); t.textContent = LIST_NAME[S.listKind] || '题单'; s.textContent = `${c.length} 题 · 点题目开始刷`; return; }
     if (S.view === 'summary') { t.textContent = '本轮完成'; s.textContent = `${S.session ? S.session.n : 0} 题`; return; }
     t.textContent = '877生化速刷';
@@ -240,6 +250,10 @@
     const kpList = f.chap ? KPS.filter(k => k.ch === f.chap) : [];
     const kpChips = f.chap ? [`<button class="chip ${!f.kp ? 'on' : ''}" data-act="kp" data-v="">全部考点</button>`]
       .concat(kpList.map(k => `<button class="chip ${f.kp === k.kp ? 'on' : ''}" data-act="kp" data-v="${esc(k.kp)}">${esc(k.kp)}<span class="n">${k.n}</span></button>`)).join('') : '';
+    const TP_ORDER = ['名词', '大题', '选择', '判断', '填空'];
+    const tpCnt = {}; BANK.forEach(q => { const g = tpGroup(q); tpCnt[g] = (tpCnt[g] || 0) + 1; });
+    const tpChips = [`<button class="chip ${!f.tp ? 'on' : ''}" data-act="tp" data-v="">全部<span class="n">${BANK.length}</span></button>`]
+      .concat(TP_ORDER.map(t => `<button class="chip ${f.tp === t ? 'on' : ''}" data-act="tp" data-v="${t}">${t}${t === '名词' ? '解释' : t === '大题' ? '（问答·计算）' : ''}<span class="n">${tpCnt[t] || 0}</span></button>`)).join('');
     const scopes = [['all', '全部题'], ['weak', '未掌握'], ['forgot', '只刷忘记'], ['vague', '模糊待巩固'], ['fav', '我的收藏']];
     const scopeChips = scopes.map(([v, t]) => `<button class="chip ${f.scope === v ? 'on' : ''}" data-act="scope" data-v="${v}">${t}</button>`).join('');
     const cnt = buildQueue().length;
@@ -281,6 +295,8 @@
         ${[['fav', '收藏'], ['forgot', '忘记'], ['vague', '模糊'], ['known', '熟悉'], ['weak', '未掌握']].map(([k, n]) =>
       `<button class="chip" data-act="listOpen" data-v="${k}">${n}<span class="n">${listQueue(k).length}</span></button>`).join('')}
       </div>
+      <div class="section-label">按题型<span class="muted" style="font-weight:400;font-size:11px"> 名词解释与大题可单独整块刷</span></div>
+      <div class="row wrap">${tpChips}</div>
       <div class="section-label">按章节</div><div class="row wrap">${chapChips}</div>
       ${f.chap ? `<div class="section-label">按考点</div><div class="row wrap">${kpChips}</div>` : ''}
       <div class="section-label">范围</div><div class="row wrap">${scopeChips}</div>
@@ -456,7 +472,7 @@
     const rated = S.rated;
     return `
     <div class="progress"><i id="qbar"></i></div>
-    <div class="backrow"><button class="backbtn" data-act="home">‹ 首页</button><span class="bk-sub">${esc(q.chname)}${st ? ' · 上次：' + RATE_TXT[st.r] : ''}</span></div>
+    <div class="backrow"><button class="backbtn" data-act="home">‹ 首页</button><span class="bk-sub">${esc(q.chname)}${st ? ' · 上次：' + RATE_TXT[st.r] : ''}${S.ephemeral ? ' · 临时' : ''}</span></div>
     <div class="card">
       <div class="qhead">
         <div class="qmeta"><span class="badge pri">${esc(q.kp)}</span><span class="badge">${q.y}年 · ${esc(q.ty)}${esc(q.num)}</span></div>
@@ -601,18 +617,21 @@
   function startSession() {
     S.queue = buildQueue();
     if (!S.queue.length) { toast('这个范围没有题目'); return; }
+    S.ephemeral = false;
     launch(0);
   }
-  function startCustom(list, idx, label) {
+  function startCustom(list, idx, label, keepProgress) {
     if (!list.length) { toast('没有题目'); return; }
     S.queue = list;
+    S.ephemeral = keepProgress !== false;
     launch(Math.max(0, Math.min(idx || 0, list.length - 1)), label);
   }
   function launch(idx, label) {
+    if (!S.ephemeral) S.ephemeral = false;
     S.custom = label || '';
     S.idx = idx; S.phase = 'ask'; S.revealed = {}; S.picked = null; S.rated = null; S.correctFlag = null;
-    const lb = label ? { ch: label, kp: '', sc: '' } : scopeLabel();
-    S.session = { t: now(), scope: label || (lb.ch + ' · ' + lb.kp + ' · ' + lb.sc), n: 0, forgot: 0, vague: 0, known: 0, correct: 0, wrong: 0 };
+    const lb = label ? { ch: label, kp: '', sc: '', tp: '' } : scopeLabel();
+    S.session = { t: now(), scope: label || ((lb.tp ? lb.tp + ' · ' : '') + lb.ch + ' · ' + lb.kp + ' · ' + lb.sc), n: 0, forgot: 0, vague: 0, known: 0, correct: 0, wrong: 0 };
     S.view = 'quiz'; S.tab = 'quiz'; render(); saveSess();
   }
   function resumeSession() {
@@ -621,9 +640,9 @@
     const map = new Map(BANK.map(q => [q.id, q]));
     const list = s.ids.map(id => map.get(id)).filter(Boolean);
     if (!list.length) { clearSess(); toast('上次的题目已失效'); render(); return; }
-    S.filter = Object.assign({ chap: '', kp: '', scope: 'all', order: 'seq' }, s.filter || {});
+    S.filter = Object.assign({ tp: '', chap: '', kp: '', scope: 'all', order: 'seq' }, s.filter || {});
     S.queue = list;
-    S.custom = '';
+    S.custom = ''; S.ephemeral = false;
     S.idx = Math.min(s.idx || 0, list.length - 1);
     S.phase = 'ask'; S.revealed = {}; S.picked = null; S.rated = null; S.correctFlag = null;
     const lb = scopeLabel();
@@ -655,7 +674,7 @@
   }
   function finish() {
     if (S.session) { S.rec.sessions.push({ ...S.session }); if (S.rec.sessions.length > 300) S.rec.sessions = S.rec.sessions.slice(-300); saveRec(); }
-    clearSess();
+    if (!S.ephemeral) clearSess(); else S.snap = loadJSON(LS.sess(S.user), null) || S.snap;
     S.view = 'summary'; render();
   }
 
@@ -665,6 +684,7 @@
     if (el) {
       const act = el.dataset.act, v = el.dataset.v, i = el.dataset.i;
       switch (act) {
+        case 'tp': S.filter.tp = v; S.filter.chap = ''; S.filter.kp = ''; render(); return;
         case 'chap': S.filter.chap = v; S.filter.kp = ''; render(); return;
         case 'kp': S.filter.kp = v; render(); return;
         case 'scope': S.filter.scope = v; render(); return;
@@ -800,7 +820,12 @@
 
   /* ---------- boot ---------- */
   async function boot() {
-    S.token = localStorage.getItem(LS.token) || '';
+    S.token = (function () {
+      let t = loadJSON(LS.token, '') || localStorage.getItem(LS.token) || '';
+      if (typeof t === 'string') t = t.trim().replace(/^["']+|["']+$/g, '');
+      return t;
+    })();
+    if (S.token) saveJSON(LS.token, S.token);
     S.repo = localStorage.getItem(LS.repo) || S.repo;
     S.branch = localStorage.getItem(LS.branch) || 'main';
     S.auto = loadJSON(LS.auto, true);

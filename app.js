@@ -76,21 +76,35 @@
     FIXES = loadJSON('qb.fixes', null) || {};
     applyFixes();
   }
+  function mergeFixObjects(a, b) {
+    const out = {};
+    const ids = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+    ids.forEach(id => {
+      const x = (a || {})[id], y = (b || {})[id];
+      if (!x) { out[id] = y; return; }
+      if (!y) { out[id] = x; return; }
+      out[id] = ((y.ts || 0) > (x.ts || 0)) ? y : x;     // 时间新的胜出（Pages 部署有延迟，不会把新改动打回去）
+    });
+    return out;
+  }
+  async function fetchFixFile(url) {
+    try {
+      const ac = new AbortController(); const tm = setTimeout(() => ac.abort(), 6000);
+      const r = await fetch(url, { cache: 'no-store', signal: ac.signal });
+      clearTimeout(tm);
+      if (!r.ok) return null;
+      const j = await r.json();
+      return (j && typeof j === 'object') ? j : null;
+    } catch (e) { return null; }
+  }
   async function loadFixesRemote() {
-    const urls = ['./fixes.json?t=' + now(), api.raw('fixes.json') + '?t=' + now()];
-    for (let i = 0; i < urls.length; i++) {
-      try {
-        const ac = new AbortController(); const tm = setTimeout(() => ac.abort(), 5000);
-        const r = await fetch(urls[i], { cache: 'no-store', signal: ac.signal });
-        clearTimeout(tm);
-        if (!r.ok) continue;
-        const j = await r.json(); if (!j || typeof j !== 'object') continue;
-        if (JSON.stringify(j) !== JSON.stringify(FIXES)) {
-          FIXES = j; saveJSON('qb.fixes', FIXES); applyFixes();
-          if (S.view) render();
-        }
-        return;
-      } catch (e) { }
+    const [viaPages, viaRaw] = await Promise.all([
+      fetchFixFile('./fixes.json?t=' + now()),
+      fetchFixFile(api.raw('fixes.json') + '?t=' + now())
+    ]);
+    const merged = mergeFixObjects(mergeFixObjects(FIXES, viaPages || {}), viaRaw || {});
+    if (JSON.stringify(merged) !== JSON.stringify(FIXES)) {
+      FIXES = merged; saveJSON('qb.fixes', FIXES); applyFixes(); if (S.view) render();
     }
   }
 
@@ -982,7 +996,7 @@
       if (cur && cur.text) { try { obj = JSON.parse(cur.text) || {}; } catch (e) { obj = {}; } }
       obj[q.id] = entry;
       await api.write('fixes.json', JSON.stringify(obj, null, 1), 'fix: 纠错 ' + q.id + (S.user ? ' by ' + S.user : ''), cur && cur.sha);
-      FIXES = obj; applyFix(q);
+      FIXES = obj; saveJSON('qb.fixes', FIXES); applyFix(q);
       closeSheet(); S.fix = null; S.revealed = {}; render(); toast('已提交，题库已更新');
     } catch (e) {
       const msg = e && e.code === 'no_token' ? '未配置令牌' : (e && e.message || '未知错误');

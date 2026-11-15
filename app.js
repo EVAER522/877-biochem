@@ -296,6 +296,16 @@
         <button class="hstat warn" data-act="listOpen" data-v="forgot"><b>${forgotN}</b><span>待复盘</span></button>
       </div>
     </div>
+    <div class="quick">
+      <button class="qcard" data-act="memo">
+        <div class="qt">背名词解释</div>
+        <div class="qn">${memoN}<span>词条</span></div>
+      </button>
+      <button class="qcard" data-act="searchSheet">
+        <div class="qt">搜题</div>
+        <div class="qn sub">题干 · 答案 · 考点</div>
+      </button>
+    </div>
     ${snapCard}
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:flex-start;margin-bottom:6px">
@@ -328,22 +338,6 @@
       <div class="tiles">
         ${tiles.map(([k, n, c]) => `<button class="tile" data-act="listOpen" data-v="${k}" style="--c:${c}"><b>${listQueue(k).length}</b><span>${n}</span></button>`).join('')}
       </div>
-      <button class="memoentry" data-act="memo">
-        <div><div class="me-t">背名词解释 <span class="me-n">${memoN} 词条</span></div>
-        <div class="muted" style="margin-top:3px">121 道真题按词条去重，点开即看答案与历年原题，不计入进度</div></div>
-        <span class="me-go">去背 ›</span>
-      </button>
-    </div>
-    <div class="card">
-      <div class="row" style="justify-content:space-between;align-items:flex-start">
-        <div><div class="h1" style="margin:0">搜题</div>
-        <div class="muted" style="margin-top:4px">题干、选项、答案、考点都能搜</div></div>
-      </div>
-      <div class="searchwrap">
-        <input id="sq" class="search" type="search" placeholder="关键词，如 米氏方程 / 端粒酶 / 2009年" value="${esc(S.sw)}"/>
-        ${S.sw ? '<button class="sclr" data-act="clearSearch">×</button>' : ''}
-      </div>
-      <div id="sres">${searchHTML()}</div>
     </div>
     <div class="hintline">选择题点选项即判；判断题选对/错；填空与主观题答案分要点遮盖，点一下显示一块。</div>`;
   }
@@ -636,6 +630,16 @@
   function normTerm(t) {
     return cleanTerm(t).replace(/（[^）]*）/g, '').replace(/\([^)]*\)/g, '').replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, '').toLowerCase();
   }
+  function searchSheet() {
+    openSheet(`<h3>搜题</h3>
+      <div class="searchwrap" style="margin-top:10px">
+        <input id="sq" class="search" type="search" placeholder="词如 米氏方程 / 端粒酶 / 2009年" value="${esc(S.sw)}"/>
+        ${S.sw ? '<button class="sclr" data-act="clearSearch">×</button>' : ''}
+      </div>
+      <div id="sres">${searchHTML()}</div>
+      <div style="margin-top:12px"><button class="btn ghost block" data-act="closeSheet">关闭</button></div>`);
+    setTimeout(() => { const el = $('sq'); if (el) el.focus(); }, 60);
+  }
   function memoGroups() {
     if (S._memo) return S._memo;
     const map = new Map();
@@ -692,12 +696,11 @@
   function memHTML() {
     const gs = memoGroups();
     return `<div class="backrow"><button class="backbtn" data-act="home">‹ 首页</button>
-      <span class="bk-sub">按词条去重 · 点开看答案，再点开看原题</span>
+      <span class="bk-sub">点开看答案</span>
       <button class="backbtn" style="margin-left:auto;white-space:nowrap" data-act="memoToggleAll">${Object.keys(S.mo).length ? '全部收起' : '全部展开'}</button></div>
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:flex-start">
-          <div><div class="h1" style="margin:0">${gs.length} 个词条</div>
-          <div class="muted" style="margin-top:4px">由 121 道名词解释真题合并同义词条；只看不记分，不影响答题进度</div></div>
+          <div class="h1" style="margin:0">${gs.length} 个词条</div>
         </div>
         <div class="searchwrap" style="margin-top:10px">
           <input id="mq" class="search" type="search" placeholder="搜词条名或答案，如 信号肽 / 操纵子" value="${esc(S.mw)}"/>
@@ -832,6 +835,7 @@
         case 'start': startSession(); return;
         case 'clearSearch': S.sw = ''; render(); return;
         case 'home': S.view = 'setup'; S.tab = 'quiz'; render(); return;
+        case 'searchSheet': searchSheet(); return;
         case 'memo': S.view = 'memo'; S.tab = 'quiz'; render(); return;
         case 'memoOpen': { const g = memoGroups()[v]; if (!g) return; S.mo[g.key] = !S.mo[g.key]; render(); return; }
         case 'memoOpen2': { const g = memoGroups()[v]; if (!g) return; S.mo2[g.key] = !S.mo2[g.key]; render(); return; }
@@ -855,6 +859,7 @@
           startCustom(rs, 0, '搜索：' + S.sw.trim() + '（' + rs.length + '题）'); return;
         }
         case 'openq': {
+          closeSheet();
           const rs = searchResults();
           const i = rs.findIndex(q => q.id === v);
           startCustom(rs, i < 0 ? 0 : i, '搜索：' + S.sw.trim() + '（' + rs.length + '题）'); return;

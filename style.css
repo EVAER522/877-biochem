@@ -259,3 +259,13 @@ main{padding:12px 14px 8px}
 .fixcta .btn{padding:13px 18px;border-radius:12px}
 .hintline{font-size:11.5px;color:var(--tx3);line-height:1.7;margin:14px 4px 12px}
 .ctabtn{margin-top:16px;padding:14px 18px;border-radius:14px;box-shadow:0 8px 18px rgba(15,118,110,.18)}
+
+/* 首页并排快捷入口 */
+.quick{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.qcard{background:#fff;border:1px solid var(--line);border-radius:14px;padding:13px 14px;text-align:left;
+  box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.qcard:active{background:#fafbfc}
+.qt{font-size:14px;font-weight:650;color:var(--tx)}
+.qn{margin-top:6px;font-size:20px;font-weight:650;color:var(--pri);line-height:1.1}
+.qn span{font-size:11px;font-weight:400;color:var(--tx3);margin-left:4px}
+.qn.sub{font-size:12px;font-weight:400;color:var(--tx3);margin-top:8px}

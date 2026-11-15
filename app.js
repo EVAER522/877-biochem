@@ -58,20 +58,40 @@
   /* ---------- 题库纠错覆盖层（fixes.json，全设备生效） ---------- */
   let FIXES = {};
   const SUBJ_TY = t => /填空|名词|问答|简答|论述|计算/.test(t || '');
+  function baseOf(q) {
+    if (!q.__base) q.__base = { ans: q.ans, correct: q.correct, pts: (q.pts || []).slice() };
+    return q.__base;
+  }
   function applyFix(q) {
+    const b = baseOf(q);
+    q.ans = b.ans; q.correct = b.correct; q.pts = b.pts.slice();
     const f = FIXES[q.id]; if (!f) return;
     if (f.c) q.correct = f.c;
     if (typeof f.a === 'string') q.ans = f.a.indexOf('｜考点') >= 0 ? f.a : (f.a + (q.kp ? '｜考点：' + q.kp : ''));
     if (Array.isArray(f.pts)) q.pts = f.pts.slice();
   }
-  function applyFixes() { (window.QBANK || []).forEach(applyFix); }
-  async function loadFixes() {
-    try {
-      const r = await fetch(api.raw('fixes.json') + '?t=' + Date.now(), { cache: 'no-store' });
-      if (!r.ok) return;
-      FIXES = (await r.json()) || {};
-      applyFixes();
-    } catch (e) { }
+  function applyFixes() { (window.QBANK || []).forEach(applyFix); S._memo = null; }
+  /* 先用本机缓存（0 网络、0 等待），再后台拉最新；不阻塞首屏 */
+  function applyFixesCache() {
+    FIXES = loadJSON('qb.fixes', null) || {};
+    applyFixes();
+  }
+  async function loadFixesRemote() {
+    const urls = ['./fixes.json?t=' + now(), api.raw('fixes.json') + '?t=' + now()];
+    for (let i = 0; i < urls.length; i++) {
+      try {
+        const ac = new AbortController(); const tm = setTimeout(() => ac.abort(), 5000);
+        const r = await fetch(urls[i], { cache: 'no-store', signal: ac.signal });
+        clearTimeout(tm);
+        if (!r.ok) continue;
+        const j = await r.json(); if (!j || typeof j !== 'object') continue;
+        if (JSON.stringify(j) !== JSON.stringify(FIXES)) {
+          FIXES = j; saveJSON('qb.fixes', FIXES); applyFixes();
+          if (S.view) render();
+        }
+        return;
+      } catch (e) { }
+    }
   }
 
   function b64e(str) {
@@ -1230,10 +1250,10 @@
     cur = cur.trim();
     if (cur.charAt(0) === '"') { try { cur = JSON.parse(cur); } catch (e) { cur = cur.replace(/^"|"$/g, ''); } }
     if (cur.indexOf('\\"') >= 0) cur = cur.replace(/\\?"/g, '');
-    await loadFixes();
-    await loadRemoteIndex();
-    if (!cur) { render(); userSheet(); return; }
-    setUser(cur, true);
+    applyFixesCache();                 // 修复：同步读缓存，先保证题库是校订后的
+    if (!cur) { render(); userSheet(); loadRemoteIndex(); loadFixesRemote(); return; }
+    setUser(cur, true);                // 先用本地记录渲染，不等网络
+    loadRemoteIndex(); loadFixesRemote();
     if (S.token) pullFromRepo(cur, true); else setSync('off', '仅本地（未配置令牌）');
   }
   window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveSess(); });

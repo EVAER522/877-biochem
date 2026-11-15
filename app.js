@@ -67,18 +67,29 @@
   }
 
   /* ---------- record ---------- */
-  function blankRec(u) { return { u, updated: 0, progress: {}, fav: [], sessions: [] }; }
+  function blankRec(u) { return { u, updated: 0, progress: {}, fav: [], favTs: {}, favDel: {}, sessions: [], mem: {}, brk: null }; }
   function loadRec(u) {
     let r = loadJSON(LS.rec(u), null);
     if (!r) {
       const bad = loadJSON(LS.rec('"' + u + '"'), null);
       if (bad) { r = bad; saveJSON(LS.rec(u), r); localStorage.removeItem(LS.rec('"' + u + '"')); }
     }
-    S.mem = loadJSON(LS.mem(u), {}) || {};
     S.rec = r || blankRec(u);
     S.rec.fav = S.rec.fav || []; S.rec.progress = S.rec.progress || {}; S.rec.sessions = S.rec.sessions || [];
+    S.rec.favTs = S.rec.favTs || {}; S.rec.favDel = S.rec.favDel || {}; S.rec.mem = S.rec.mem || {};
+    S.rec.fav.forEach(id => { if (S.rec.favTs[id] === undefined) S.rec.favTs[id] = 0; });
+    // 旧版本把背名词熟练度单独存在 qb.mem.<用户>，迁移进记录并清理
+    const legacyMem = loadJSON(LS.mem(u), null);
+    if (legacyMem && typeof legacyMem === 'object') {
+      Object.keys(legacyMem).forEach(k => {
+        const v = legacyMem[k], cur = S.rec.mem[k];
+        if (v && (!cur || (v.ts || 0) > (cur.ts || 0))) S.rec.mem[k] = { r: v.r || '', ts: v.ts || 0 };
+      });
+      localStorage.removeItem(LS.mem(u));
+    }
+    S.mem = S.rec.mem;
   }
-  function saveMem() { if (S.user) saveJSON(LS.mem(S.user), S.mem); }
+  function saveMem() { if (S.user) saveRec(); }
   function saveRec() {
     S.rec.updated = now();
     saveJSON(LS.rec(S.user), S.rec);
@@ -86,10 +97,20 @@
   }
   function saveSess() {
     if (!S.user || S.ephemeral || S.view !== 'quiz' || !S.queue || !S.queue.length) return;
-    saveJSON(LS.sess(S.user), { t: now(), filter: { ...S.filter }, idx: S.idx, ids: S.queue.map(q => q.id) });
+    const payload = { t: now(), filter: { ...S.filter }, idx: S.idx, ids: S.queue.map(q => q.id) };
+    saveJSON(LS.sess(S.user), payload);
+    S.rec.brk = payload; saveRec();            // 断点跟着记录同步，换设备可续刷
   }
-  function clearSess() { if (S.user) localStorage.removeItem(LS.sess(S.user)); S.snap = null; }
-  function loadSess(u) { S.snap = loadJSON(LS.sess(u), null) || null; }
+  function clearSess() {
+    if (S.user) localStorage.removeItem(LS.sess(S.user));
+    S.snap = null;
+    if (S.rec) { S.rec.brk = null; saveRec(); }
+  }
+  function loadSess(u) {
+    const local = loadJSON(LS.sess(u), null);
+    const remote = (S.rec && S.rec.brk) || null;
+    S.snap = !local ? remote : !remote ? local : ((local.t || 0) >= (remote.t || 0) ? local : remote);
+  }
   function snapInfo() {
     const s = S.snap; if (!s || !s.ids || !s.ids.length) return null;
     if (s.idx >= s.ids.length) return null;
@@ -100,12 +121,19 @@
     out.sessions = local.sessions.slice();
     remote.sessions.forEach(rs => { if (!out.sessions.some(x => x.t === rs.t)) out.sessions.push(rs); });
     out.sessions.sort((a, b) => a.t - b.t);
-    out.fav = Array.from(new Set([...(local.fav || []), ...(remote.fav || [])]));
+    out.favTs = { ...(remote.favTs || {}) }; Object.entries(local.favTs || {}).forEach(([k, v]) => { if ((v || 0) > (out.favTs[k] || 0)) out.favTs[k] = v; });
+    out.favDel = { ...(remote.favDel || {}) }; Object.entries(local.favDel || {}).forEach(([k, v]) => { if ((v || 0) > (out.favDel[k] || 0)) out.favDel[k] = v; });
+    out.fav = Array.from(new Set([...(local.fav || []), ...(remote.fav || [])]))
+      .filter(id => (out.favTs[id] || 0) > (out.favDel[id] || 0));
     out.progress = { ...(remote.progress || {}) };
     Object.entries(local.progress || {}).forEach(([k, v]) => {
       const r = out.progress[k];
       if (!r || (v.n || 0) >= (r.n || 0) || (v.ts || 0) > (r.ts || 0)) out.progress[k] = v;
     });
+    out.mem = { ...(remote.mem || {}) };
+    Object.entries(local.mem || {}).forEach(([k, v]) => { const cur = out.mem[k]; if (!cur || (v && (v.ts || 0) > (cur.ts || 0))) out.mem[k] = v; });
+    const lb = local.brk, rb = remote.brk;
+    out.brk = !lb ? rb : !rb ? lb : ((lb.t || 0) >= (rb.t || 0) ? lb : rb);
     out.updated = Math.max(local.updated || 0, remote.updated || 0);
     return out;
   }
@@ -173,10 +201,9 @@
     } catch (e) { }
   }
   function setUser(u, silent) {
-    loadSess(u);
     S.user = u; localStorage.setItem(LS.cur, u);
     const users = allUsers(); if (!users.includes(u)) { users.push(u); saveJSON(LS.users, users); }
-    loadRec(u); updateUserName(); render();
+    loadRec(u); loadSess(u); updateUserName(); render();
     if (!silent && S.token) pullFromRepo(u, true);
     else if (!S.token) setSync('off', '仅本地（未配置令牌）');
   }
@@ -684,9 +711,10 @@
   }
   function memCard(g) {
     const open = !!S.mo[g.key], open2 = !!S.mo2[g.key];
+    const mr = (S.mem[g.key] && S.mem[g.key].r) || '';
     const ansMain = g.ansVars[0] || '';
     const others = g.ansVars.slice(1);
-    return `<div class="mcard ${open ? 'open' : ''} ${S.mem[g.key] ? 'r-' + S.mem[g.key].r : ''}">
+    return `<div class="mcard ${open ? 'open' : ''} ${mr ? 'r-' + mr : ''}">
       <button class="mhead" data-act="memoOpen" data-v="${g.idx}">
         <div style="min-width:0">
           <div class="mterm">${esc(g.zh)}${g.en ? `<span class="men">${esc(g.en)}</span>` : ''}<span class="mcnt">${g.items.length} 次</span></div>
@@ -696,8 +724,8 @@
       </button>
       <div class="mrate">
         <span class="mrlab">熟练度</span>
-        ${['forgot', 'vague', 'known'].map(k => `<button class="mbtn ${S.mem[g.key] && S.mem[g.key].r === k ? 'on ' + k : ''}" data-act="memoRate" data-v="${g.idx}" data-r="${k}">${RATE_TXT[k]}</button>`).join('')}
-        ${S.mem[g.key] ? '<span class="mrtime">' + new Date(S.mem[g.key].ts).toLocaleDateString('zh-CN') + '</span>' : '<span class="mrtime">未标记</span>'}
+        ${['forgot', 'vague', 'known'].map(k => `<button class="mbtn ${mr === k ? 'on ' + k : ''}" data-act="memoRate" data-v="${g.idx}" data-r="${k}">${RATE_TXT[k]}</button>`).join('')}
+        ${mr ? '<span class="mrtime">' + new Date(S.mem[g.key].ts).toLocaleDateString('zh-CN') + '</span>' : '<span class="mrtime">未标记</span>'}
       </div>
       ${open ? `<div class="mans"><div class="mstrike">答案</div><p>${esc(ansMain)}</p>
         ${others.map(o => `<p class="mvar">另有表述：${esc(o)}</p>`).join('')}</div>` : ''}
@@ -902,7 +930,7 @@
         case 'memoRate': {
           const g = memoGroups()[v]; if (!g) return;
           const cur = S.mem[g.key];
-          if (cur && cur.r === r) delete S.mem[g.key]; else S.mem[g.key] = { r, ts: Date.now() };
+          S.mem[g.key] = (cur && cur.r === r) ? { r: '', ts: Date.now() } : { r, ts: Date.now() };
           saveMem(); render(); return;
         }
         case 'memoOpen2': { const g = memoGroups()[v]; if (!g) return; S.mo2[g.key] = !S.mo2[g.key]; render(); return; }
@@ -974,7 +1002,9 @@
         case 'rate': rate(el.dataset.r); return;
         case 'star': {
           const q = S.queue[S.idx]; const fav = S.rec.fav;
-          const k = fav.indexOf(q.id); if (k >= 0) fav.splice(k, 1); else fav.push(q.id);
+          const k = fav.indexOf(q.id);
+          if (k >= 0) { fav.splice(k, 1); S.rec.favDel[q.id] = now(); delete S.rec.favTs[q.id]; }
+          else { fav.push(q.id); S.rec.favTs[q.id] = now(); delete S.rec.favDel[q.id]; }
           saveRec(); render(); return;
         }
         case 'next': case 'skip': next(); return;

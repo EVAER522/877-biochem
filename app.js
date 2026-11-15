@@ -55,6 +55,25 @@
       return r.json();
     }
   };
+  /* ---------- 题库纠错覆盖层（fixes.json，全设备生效） ---------- */
+  let FIXES = {};
+  const SUBJ_TY = t => /填空|名词|问答|简答|论述|计算/.test(t || '');
+  function applyFix(q) {
+    const f = FIXES[q.id]; if (!f) return;
+    if (f.c) q.correct = f.c;
+    if (typeof f.a === 'string') q.ans = f.a.indexOf('｜考点') >= 0 ? f.a : (f.a + (q.kp ? '｜考点：' + q.kp : ''));
+    if (Array.isArray(f.pts)) q.pts = f.pts.slice();
+  }
+  function applyFixes() { (window.QBANK || []).forEach(applyFix); }
+  async function loadFixes() {
+    try {
+      const r = await fetch(api.raw('fixes.json') + '?t=' + Date.now(), { cache: 'no-store' });
+      if (!r.ok) return;
+      FIXES = (await r.json()) || {};
+      applyFixes();
+    } catch (e) { }
+  }
+
   function b64e(str) {
     const bytes = new TextEncoder().encode(str); let bin = '';
     const chunk = 0x8000;
@@ -555,6 +574,7 @@
         <button class="btn ${rated === 'known' ? 'on' : ''}" data-r="known" data-act="rate">熟悉</button>
       </div>
       ${showAns ? `<div class="rate-hint">${S.auto ? '选完自动下一题' : '选完点下方按钮进入下一题'}</div>` : `<div class="rate-hint">先自己作答，再显示答案</div>`}
+      <div style="text-align:right;margin-top:2px"><button class="linkbtn" data-act="fixOpen">答案有问题？纠错 ›</button></div>
       <div class="row" style="margin-top:14px;gap:8px">
         <button class="btn ghost" style="flex:1" data-act="prev">上一题</button>
         <button class="btn ghost" style="flex:1" data-act="skip">跳过/下一题</button>
@@ -834,6 +854,98 @@
       <div class="field"><label>分支</label><input id="br" value="${esc(S.branch)}"/></div>
       <button class="btn block" data-act="saveRepo">保存</button>`);
   }
+  /* ---------- 纠错编辑器 ---------- */
+  function fixState(q) {
+    const raw = q.ans || '';
+    S.fix = {
+      id: q.id, stage: 'edit', c: q.correct || '',
+      ans: raw.split('｜考点')[0],
+      blocks: SUBJ_TY(q.ty) ? ((q.pts && q.pts.length) ? q.pts.slice() : []) : []
+    };
+  }
+  function collectFix() {
+    if (!S.fix) return;
+    const a = $('fixAns'); if (a) S.fix.ans = a.value;
+    const c = $('fixC'); if (c) S.fix.c = c.value;
+    const bs = Array.from(document.querySelectorAll('.fixblk')).map(t => t.value);
+    if (bs.length) S.fix.blocks = bs;
+  }
+  function fixSheet(q) {
+    fixState(q);
+    S.fix.sheet = q.id;
+    openSheet(fixHTML());
+  }
+  function fixHTML() {
+    const q = BANK.find(x => x.id === S.fix.id) || {};
+    const subj = SUBJ_TY(q.ty);
+    if (S.fix.stage === 'confirm') return fixConfirmHTML(q);
+    let pick = '';
+    if (q.ty === '选择' || q.ty === '单选' || q.ty === '多选') {
+      const ks = (q.opts || []).map((o, i) => 'ABCD'[i] || String(i + 1));
+      pick = `<div class="field"><label>正确选项</label><select id="fixC">${ks.map(k => `<option value="${k}"${k === (S.fix.c || '').charAt(0) ? ' selected' : ''}>${k}</option>`).join('')}</select></div>`;
+    } else if (q.ty === '判断') {
+      pick = `<div class="field"><label>正确答案</label><select id="fixC">
+        <option value="√"${S.fix.c === '√' ? ' selected' : ''}>对（√）</option>
+        <option value="×"${S.fix.c === '×' ? ' selected' : ''}>错（×）</option></select></div>`;
+    }
+    let blocksHTML = '';
+    if (subj) {
+      blocksHTML = `<div class="field"><label>答案遮挡块（刷题时一块一块点开）</label>
+        ${S.fix.blocks.map((t, i) => `<div style="position:relative;margin-bottom:10px">
+          <textarea class="fixblk" rows="3">${esc(t)}</textarea>
+          <button class="linkbtn" style="position:absolute;right:2px;top:-2px" data-act="fixDelBlock" data-i="${i}">删除</button>
+        </div>`).join('') || '<div class="muted" style="margin-bottom:8px">还没有遮挡块，可先点“按句切分”自动生成</div>'}
+        <div class="row" style="gap:8px"><button class="btn ghost" style="flex:1" data-act="fixAddBlock">＋ 新增一块</button>
+        <button class="btn ghost" style="flex:1" data-act="fixSplit">按句切分</button></div>
+        <div class="muted" style="margin-top:6px">块数越多遮盖越细；建议每块 1–2 句。</div></div>`;
+    }
+    return `<h3>纠错 · ${esc(q.y)}年 ${esc(q.ty)}${esc(q.num)}</h3>
+      <div class="desc">${esc((q.stem || '').slice(0, 80))}${(q.stem || '').length > 80 ? '…' : ''}</div>
+      ${pick}
+      <div class="field"><label>答案文本（不含“考点”）</label><textarea id="fixAns" rows="${subj ? 6 : 2}">${esc(S.fix.ans)}</textarea></div>
+      ${blocksHTML}
+      <button class="btn block" data-act="fixSubmit">提交修改</button>
+      <button class="btn ghost block" style="margin-top:8px" data-act="fixCancel">取消</button>
+      <div class="desc" style="margin-top:12px">提交后会写回 GitHub 仓库的 fixes.json，所有设备打开页面时自动生效；不影响本机刷题记录。</div>`;
+  }
+  function fixConfirmHTML(q) {
+    const oldC = q.correct || '—';
+    const oldAns = (q.ans || '').split('｜考点')[0];
+    const rows = [];
+    if (S.fix.c && S.fix.c !== oldC) rows.push(`正确项：${esc(oldC)} → <b>${esc(S.fix.c)}</b>`);
+    if (S.fix.ans !== oldAns) rows.push(`答案文本已修改（${oldAns.length} → ${S.fix.ans.length} 字）`);
+    if (SUBJ_TY(q.ty)) {
+      const n0 = (q.pts || []).length, n1 = S.fix.blocks.filter(t => t.trim()).length;
+      if (n0 !== n1 || (q.pts || []).join('') !== S.fix.blocks.join('')) rows.push(`遮挡块：${n0} 块 → <b>${n1}</b> 块`);
+    }
+    return `<h3>确认提交修改</h3>
+      <div class="desc">${esc(q.y)}年 ${esc(q.ty)}${esc(q.num)} · ${esc(q.id)}</div>
+      <div class="card" style="margin-top:10px;padding:14px">${rows.length ? rows.map(r => `<div style="line-height:1.9">• ${r}</div>`).join('') : '<div class="muted">内容没有变化</div>'}</div>
+      <div class="desc" style="margin-top:12px">确认后写入仓库 fixes.json，立即对本账号所有设备生效，其它设备刷新后同步。</div>
+      <button class="btn block" data-act="fixConfirm">确认提交</button>
+      <button class="btn ghost block" style="margin-top:8px" data-act="fixBack">返回修改</button>`;
+  }
+  async function saveFix() {
+    const q = BANK.find(x => x.id === S.fix.id); if (!q) return;
+    if (!S.token) { toast('未配置令牌，无法写回题库'); tokenSheet(); return; }
+    const entry = { a: S.fix.ans, u: S.user || '', ts: now() };
+    if (S.fix.c) entry.c = S.fix.c;
+    if (SUBJ_TY(q.ty)) entry.pts = S.fix.blocks.filter(t => String(t).trim());
+    try {
+      const cur = await api.read('fixes.json');
+      let obj = {};
+      if (cur && cur.text) { try { obj = JSON.parse(cur.text) || {}; } catch (e) { obj = {}; } }
+      obj[q.id] = entry;
+      await api.write('fixes.json', JSON.stringify(obj, null, 1), 'fix: 纠错 ' + q.id + (S.user ? ' by ' + S.user : ''), cur && cur.sha);
+      FIXES = obj; applyFix(q);
+      closeSheet(); S.fix = null; S.revealed = {}; render(); toast('已提交，题库已更新');
+    } catch (e) {
+      const msg = e && e.code === 'no_token' ? '未配置令牌' : (e && e.message || '未知错误');
+      toast('提交失败：' + msg);
+      if (e && e.status === 401) { closeSheet(); tokenSheet(); }
+    }
+  }
+
   function importSheet() {
     openSheet(`<h3>导入记录</h3><div class="desc">选择之前导出的 JSON，会与当前用户记录合并。</div>
       <input type="file" id="impFile" accept="application/json,.json" style="width:100%;padding:10px;border:1px dashed var(--line);border-radius:10px;background:#fafbfc"/>`);
@@ -1000,6 +1112,19 @@
           S.picked = v; S.correctFlag = q.correct === v; answerDone(S.correctFlag); return;
         }
         case 'showAns': S.phase = 'revealed'; render(); return;
+        case 'fixOpen': { const q = S.queue[S.idx]; if (q) fixSheet(q); return; }
+        case 'fixCancel': closeSheet(); S.fix = null; return;
+        case 'fixSubmit': collectFix(); S.fix.stage = 'confirm'; openSheet(fixHTML()); return;
+        case 'fixBack': S.fix.stage = 'edit'; openSheet(fixHTML()); return;
+        case 'fixConfirm': await saveFix(); return;
+        case 'fixAddBlock': collectFix(); S.fix.blocks.push(''); openSheet(fixHTML()); return;
+        case 'fixDelBlock': { collectFix(); S.fix.blocks.splice(i, 1); openSheet(fixHTML()); return; }
+        case 'fixSplit': {
+          collectFix();
+          const parts = S.fix.ans.split(/(?<=[。；;])/).map(t => t.trim()).filter(Boolean);
+          S.fix.blocks = parts.length ? parts : [S.fix.ans];
+          openSheet(fixHTML()); return;
+        }
         case 'reveal': { const q = S.queue[S.idx]; S.revealed[q.id + ':' + i] = 1; render(); return; }
         case 'revealAll': { const q = S.queue[S.idx]; (q.pts || []).forEach((_, k) => S.revealed[q.id + ':' + k] = 1); render(); return; }
         case 'rate': rate(el.dataset.r); return;
@@ -1095,6 +1220,7 @@
     cur = cur.trim();
     if (cur.charAt(0) === '"') { try { cur = JSON.parse(cur); } catch (e) { cur = cur.replace(/^"|"$/g, ''); } }
     if (cur.indexOf('\\"') >= 0) cur = cur.replace(/\\?"/g, '');
+    await loadFixes();
     await loadRemoteIndex();
     if (!cur) { render(); userSheet(); return; }
     setUser(cur, true);

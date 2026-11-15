@@ -928,17 +928,36 @@
       <button class="btn ghost block" style="margin-top:8px" data-act="fixCancel">取消</button>
       <div class="desc" style="margin-top:12px">提交后会写回 GitHub 仓库的 fixes.json，所有设备打开页面时自动生效；不影响本机刷题记录。</div>`;
   }
-  function diffFix(q) {
-    const oldC = q.correct || '—';
+  const splitSent = t => String(t || '').split(/(?<=[。；;])/).map(x => x.trim()).filter(Boolean);
+  /* 核心：主观题“答案正文”和“遮挡块”只能有一个真源，谁被改就以谁为准，避免刷新后显示旧内容 */
+  function normalizeFix(q) {
+    const oldC = q.correct || '';
     const oldAns = (q.ans || '').split('｜考点')[0];
-    const rows = [];
-    if (S.fix.c && S.fix.c !== oldC) rows.push(`正确项：${esc(oldC)} → <b>${esc(S.fix.c)}</b>`);
-    if (S.fix.ans.trim() !== oldAns.trim()) rows.push(`答案文本已修改（${oldAns.length} → ${S.fix.ans.length} 字）`);
+    const oldBlocks = (q.pts || []).slice();
+    let cChanged = !!(S.fix.c && S.fix.c !== oldC);
+    let ansChanged = S.fix.ans.trim() !== oldAns.trim();
+    let blocksChanged = SUBJ_TY(q.ty) && S.fix.blocks.filter(t => String(t).trim()).join('') !== oldBlocks.join('');
     if (SUBJ_TY(q.ty)) {
-      const kept = S.fix.blocks.filter(t => String(t).trim());
-      const n0 = (q.pts || []).length, n1 = kept.length;
-      if (n0 !== n1 || (q.pts || []).join('') !== kept.join('')) rows.push(`遮挡块：${n0} 块 → <b>${n1}</b> 块`);
+      if (blocksChanged) S.fix.ans = S.fix.blocks.map(t => String(t).trim()).filter(Boolean).join(' ');
+      else if (ansChanged) S.fix.blocks = splitSent(S.fix.ans);
+    } else if (cChanged && !ansChanged) {
+      const idx = 'ABCD'.indexOf(S.fix.c);
+      const opt = idx >= 0 && q.opts && q.opts[idx] ? q.opts[idx] : '';
+      S.fix.ans = S.fix.c + (opt ? `（${opt}）` : '');
+    } else if (cChanged && ansChanged && (q.ty === '选择' || q.ty === '单选' || q.ty === '多选')) {
+      S.fix.ans = S.fix.ans.replace(/^[ABCD]/,'')
+      S.fix.ans = S.fix.c + (optText(q, S.fix.c) ? `（${optText(q, S.fix.c)}）` : '');
     }
+    return { cChanged, ansChanged, blocksChanged, oldC, oldAns, oldBlocks };
+  }
+  function optText(q, k) { const i = 'ABCD'.indexOf(k); return (q.opts || [])[i] || ''; }
+  function diffFix(q) {
+    const d = normalizeFix(q);
+    const rows = [];
+    if (d.cChanged) rows.push(`正确项：${esc(d.oldC || '—')} → <b>${esc(S.fix.c)}</b>`);
+    if (d.ansChanged) rows.push(`答案正文已修改（${d.oldAns.length} → ${S.fix.ans.length} 字）`);
+    if (d.blocksChanged) rows.push(`遮挡块：${d.oldBlocks.length} 块 → <b>${S.fix.blocks.filter(t => String(t).trim()).length}</b> 块`);
+    if (rows.length) rows.push(`<div style="color:var(--tx2);margin-top:6px">提交后的答案：${esc(S.fix.ans.slice(0, 90))}${S.fix.ans.length > 90 ? '…' : ''}</div>`);
     return rows;
   }
   function fixConfirmHTML(q) {
@@ -952,6 +971,7 @@
   }
   async function saveFix() {
     const q = BANK.find(x => x.id === S.fix.id); if (!q) return;
+    normalizeFix(q);   // 再兜一次，保证“正文/遮挡块/正确项”一致
     if (!S.token) { toast('未配置令牌，无法写回题库'); tokenSheet(); return; }
     const entry = { a: S.fix.ans, u: S.user || '', ts: now() };
     if (S.fix.c) entry.c = S.fix.c;

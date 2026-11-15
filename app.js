@@ -908,16 +908,21 @@
       <button class="btn ghost block" style="margin-top:8px" data-act="fixCancel">取消</button>
       <div class="desc" style="margin-top:12px">提交后会写回 GitHub 仓库的 fixes.json，所有设备打开页面时自动生效；不影响本机刷题记录。</div>`;
   }
-  function fixConfirmHTML(q) {
+  function diffFix(q) {
     const oldC = q.correct || '—';
     const oldAns = (q.ans || '').split('｜考点')[0];
     const rows = [];
     if (S.fix.c && S.fix.c !== oldC) rows.push(`正确项：${esc(oldC)} → <b>${esc(S.fix.c)}</b>`);
-    if (S.fix.ans !== oldAns) rows.push(`答案文本已修改（${oldAns.length} → ${S.fix.ans.length} 字）`);
+    if (S.fix.ans.trim() !== oldAns.trim()) rows.push(`答案文本已修改（${oldAns.length} → ${S.fix.ans.length} 字）`);
     if (SUBJ_TY(q.ty)) {
-      const n0 = (q.pts || []).length, n1 = S.fix.blocks.filter(t => t.trim()).length;
-      if (n0 !== n1 || (q.pts || []).join('') !== S.fix.blocks.join('')) rows.push(`遮挡块：${n0} 块 → <b>${n1}</b> 块`);
+      const kept = S.fix.blocks.filter(t => String(t).trim());
+      const n0 = (q.pts || []).length, n1 = kept.length;
+      if (n0 !== n1 || (q.pts || []).join('') !== kept.join('')) rows.push(`遮挡块：${n0} 块 → <b>${n1}</b> 块`);
     }
+    return rows;
+  }
+  function fixConfirmHTML(q) {
+    const rows = diffFix(q);
     return `<h3>确认提交修改</h3>
       <div class="desc">${esc(q.y)}年 ${esc(q.ty)}${esc(q.num)} · ${esc(q.id)}</div>
       <div class="card" style="margin-top:10px;padding:14px">${rows.length ? rows.map(r => `<div style="line-height:1.9">• ${r}</div>`).join('') : '<div class="muted">内容没有变化</div>'}</div>
@@ -1114,7 +1119,12 @@
         case 'showAns': S.phase = 'revealed'; render(); return;
         case 'fixOpen': { const q = S.queue[S.idx]; if (q) fixSheet(q); return; }
         case 'fixCancel': closeSheet(); S.fix = null; return;
-        case 'fixSubmit': collectFix(); S.fix.stage = 'confirm'; openSheet(fixHTML()); return;
+        case 'fixSubmit': {
+          collectFix();
+          const q = BANK.find(x => x.id === S.fix.id);
+          if (!q || !diffFix(q).length) { toast('内容没有变化'); return; }
+          S.fix.stage = 'confirm'; openSheet(fixHTML()); return;
+        }
         case 'fixBack': S.fix.stage = 'edit'; openSheet(fixHTML()); return;
         case 'fixConfirm': await saveFix(); return;
         case 'fixAddBlock': collectFix(); S.fix.blocks.push(''); openSheet(fixHTML()); return;

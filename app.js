@@ -14,7 +14,7 @@
   const S = {
     user: '', rec: { u: '', updated: 0, progress: {}, fav: [], sessions: [] }, tab: 'quiz', view: 'setup',
     filter: { tp: '', chap: '', kp: '', scope: 'all', order: 'seq' },
-    fold: { tp: true, chap: true, kp: true },
+    fold: { tp: true, chap: true, kp: true }, mo: {}, mo2: {}, mw: '',
     queue: [], idx: 0, phase: 'ask', revealed: {}, picked: null,
     session: null, token: '', repo: 'EVAER522/877-biochem', branch: 'main',
     auto: true, snap: null, sw: '', custom: '', listKind: 'fav', syncAt: 0, syncErr: '', sync: { state: 'idle', msg: '' }, _syncTimer: null, _syncing: false
@@ -221,7 +221,7 @@
   function render() {
     updateUserName(); updateTabbar();
     const v = $('view');
-    if (S.tab === 'quiz') v.innerHTML = S.view === 'quiz' ? quizHTML() : S.view === 'summary' ? summaryHTML() : S.view === 'lists' ? listHTML() : setupHTML();
+    if (S.tab === 'quiz') v.innerHTML = S.view === 'quiz' ? quizHTML() : S.view === 'summary' ? summaryHTML() : S.view === 'lists' ? listHTML() : S.view === 'memo' ? memHTML() : setupHTML();
     if (S.tab === 'weak') v.innerHTML = weakHTML();
     if (S.tab === 'logs') v.innerHTML = logsHTML();
     if (S.tab === 'me') v.innerHTML = meHTML();
@@ -236,6 +236,7 @@
     if (S.tab === 'me') { t.textContent = '我的'; s.textContent = '账号、同步与数据'; return; }
     if (S.tab === 'weak') { t.textContent = '薄弱考点'; s.textContent = '按小知识点统计掌握情况'; return; }
     if (S.view === 'quiz') { t.textContent = '刷题中'; s.textContent = `${S.idx + 1} / ${S.queue.length} · ${S.custom || ((S.filter.tp ? S.filter.tp + ' · ' : '') + esc(shortName(scopeLabel().ch)) + (S.filter.kp ? ' · ' + S.filter.kp : ''))}`; return; }
+    if (S.view === 'memo') { const gs = memoGroups(); t.textContent = '背名词解释'; s.textContent = `${gs.length} 个词条 · ${BANK.filter(q => q.ty === '名词').length} 道真题 · 不计入进度`; return; }
     if (S.view === 'lists') { const c = listQueue(S.listKind); t.textContent = LIST_NAME[S.listKind] || '题单'; s.textContent = `${c.length} 题 · 点题目开始刷`; return; }
     if (S.view === 'summary') { t.textContent = '本轮完成'; s.textContent = `${S.session ? S.session.n : 0} 题`; return; }
     t.textContent = '877生化速刷';
@@ -294,6 +295,11 @@
         <div class="muted" style="margin-top:4px">已掌握 ${known} 题 · 收藏 ${S.rec.fav.length} 题</div></div>
         <div class="badge pri">${cnt} 题</div>
       </div>
+      <button class="memoentry" data-act="memo">
+        <div><div class="h1" style="margin:0">背名词解释</div>
+        <div class="muted" style="margin-top:4px">${memoGroups().length} 个词条 · 121 道真题 · 点开即看答案，不计入答题进度</div></div>
+        <span class="badge pri">去背 ›</span>
+      </button>
       <div class="section-label">我的题单</div>
       <div class="row wrap">
         ${[['fav', '收藏'], ['forgot', '忘记'], ['vague', '模糊'], ['known', '熟悉'], ['weak', '未掌握']].map(([k, n]) =>
@@ -602,6 +608,80 @@
         <button class="btn ghost" style="flex:1" data-act="closeSheet">关闭</button>
       </div>`);
   }
+  function cleanTerm(t) { return String(t || '').replace(/[\s\u3000]*\d{2,}[\s\u3000]*$/, '').trim(); }
+  function normTerm(t) {
+    return cleanTerm(t).replace(/（[^）]*）/g, '').replace(/\([^)]*\)/g, '').replace(/[^\u4e00-\u9fa5A-Za-z0-9]/g, '').toLowerCase();
+  }
+  function memoGroups() {
+    if (S._memo) return S._memo;
+    const map = new Map();
+    BANK.forEach(q => {
+      if (q.ty !== '名词') return;
+      const k = normTerm(q.stem); if (!k) return;
+      if (!map.has(k)) map.set(k, { key: k, terms: [], items: [], ch: q.ch, chname: q.chname, kp: q.kp });
+      const g = map.get(k);
+      g.items.push(q);
+      const ct = cleanTerm(q.stem); if (g.terms.indexOf(ct) < 0) g.terms.push(ct);
+      if (!g.chname) { g.ch = q.ch; g.chname = q.chname; g.kp = q.kp; }
+    });
+    const arr = [...map.values()];
+    arr.forEach(g => {
+      const cnt = new Map(); g.items.forEach(q => cnt.set(q.ans, (cnt.get(q.ans) || 0) + 1));
+      g.ansVars = [...cnt.entries()].sort((a, b) => b[1] - a[1]).map(x => x[0]);
+      g.years = [...new Set(g.items.map(q => q.y))].sort();
+      g.label = g.terms.slice().sort((a, b) => b.length - a.length)[0];
+      g.en = ((g.label.match(/[（(]([^）)]*)[）)]/) || [])[1] || '').trim();
+      g.zh = g.label.replace(/[（(][^）)]*[）)]/g, '').trim();
+    });
+    arr.sort((a, b) => (parseInt(a.years[0], 10) - parseInt(b.years[0], 10)) || a.zh.localeCompare(b.zh, 'zh'));
+    arr.forEach((g, i) => { g.idx = i; });
+    S._memo = arr; return arr;
+  }
+  function memCard(g) {
+    const open = !!S.mo[g.key], open2 = !!S.mo2[g.key];
+    const ansMain = g.ansVars[0] || '';
+    const others = g.ansVars.slice(1);
+    return `<div class="mcard ${open ? 'open' : ''}">
+      <button class="mhead" data-act="memoOpen" data-v="${g.idx}">
+        <div style="min-width:0">
+          <div class="mterm">${esc(g.zh)}${g.en ? `<span class="men">${esc(g.en)}</span>` : ''}<span class="mcnt">${g.items.length} 次</span></div>
+          <div class="msub">${esc(g.chname || '')} · ${esc(g.kp || '')} · ${g.years.join(' / ')}</div>
+        </div>
+        <i class="caret ${open ? 'open' : ''}">▾</i>
+      </button>
+      ${open ? `<div class="mans"><div class="mstrike">答案</div><p>${esc(ansMain)}</p>
+        ${others.map(o => `<p class="mvar">另有表述：${esc(o)}</p>`).join('')}</div>` : ''}
+      ${open ? `<button class="mhead2" data-act="memoOpen2" data-v="${g.idx}">
+        <span>历年原题（${g.items.length}）</span><i class="caret ${open2 ? 'open' : ''}">▾</i></button>
+        ${open2 ? `<div class="mdetail">${g.items.map(q => `<div class="mrow">
+          <div class="mrowtop"><span class="badge">${esc(q.y)} 年 · 名词${esc(q.num)}</span><span class="muted">${esc(q.kp)}</span></div>
+          <div class="mstem">${esc(cleanTerm(q.stem))}</div>
+          <div class="mraw">${esc(q.ans)}</div></div>`).join('')}</div>` : ''}` : ''}
+    </div>`;
+  }
+  function memListHTML() {
+    const gs = memoGroups(); const kw = (S.mw || '').trim().toLowerCase();
+    const list = kw ? gs.filter(g => (g.zh + ' ' + g.en + ' ' + g.ansVars.join(' ')).toLowerCase().indexOf(kw) >= 0) : gs;
+    if (!list.length) return `<div class="muted" style="padding:20px 4px;text-align:center">没有匹配的词条</div>`;
+    return list.map(memCard).join('');
+  }
+  function memHTML() {
+    const gs = memoGroups();
+    return `<div class="backrow"><button class="backbtn" data-act="home">‹ 首页</button>
+      <span class="bk-sub">按词条去重 · 点开看答案，再点开看原题</span>
+      <button class="backbtn" style="margin-left:auto;white-space:nowrap" data-act="memoToggleAll">${Object.keys(S.mo).length ? '全部收起' : '全部展开'}</button></div>
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:flex-start">
+          <div><div class="h1" style="margin:0">${gs.length} 个词条</div>
+          <div class="muted" style="margin-top:4px">由 121 道名词解释真题合并同义词条；只看不记分，不影响答题进度</div></div>
+        </div>
+        <div class="searchwrap" style="margin-top:10px">
+          <input id="mq" class="search" type="search" placeholder="搜词条名或答案，如 信号肽 / 操纵子" value="${esc(S.mw)}"/>
+          ${S.mw ? '<button class="sclr" data-act="memoClear">×</button>' : ''}
+        </div>
+      </div>
+      <div id="mlist">${memListHTML()}</div>`;
+  }
   function statusSheet() {
     const st = S.sync, dot = st.state === 'ok' ? 'ok' : st.state === 'warn' ? 'warn' : 'off';
     const txt = { ok: '已同步', warn: '同步中／待同步', off: '仅本地（未配置令牌）', idle: '未同步' }[st.state] || '未同步';
@@ -728,6 +808,11 @@
         case 'start': startSession(); return;
         case 'clearSearch': S.sw = ''; render(); return;
         case 'home': S.view = 'setup'; S.tab = 'quiz'; render(); return;
+        case 'memo': S.view = 'memo'; S.tab = 'quiz'; render(); return;
+        case 'memoOpen': { const g = memoGroups()[v]; if (!g) return; S.mo[g.key] = !S.mo[g.key]; render(); return; }
+        case 'memoOpen2': { const g = memoGroups()[v]; if (!g) return; S.mo2[g.key] = !S.mo2[g.key]; render(); return; }
+        case 'memoClear': S.mw = ''; render(); return;
+        case 'memoToggleAll': { const gs = memoGroups(); if (Object.keys(S.mo).length) { S.mo = {}; S.mo2 = {}; } else { gs.forEach(g => S.mo[g.key] = true); } render(); return; }
         case 'cardSheet': cardSheet(); return;
         case 'closeSheet': closeSheet(); return;
         case 'goto': { const gi = parseInt(i === undefined ? v : i, 10); if (!isNaN(gi)) jumpTo(gi); closeSheet(); return; }
@@ -848,6 +933,11 @@
     }
   });
   document.addEventListener('input', e => {
+    if (e.target && e.target.id === 'mq') {
+      S.mw = e.target.value;
+      const box2 = $('mlist'); if (box2) box2.innerHTML = memListHTML();
+      return;
+    }
     if (e.target && e.target.id === 'sq') {
       S.sw = e.target.value;
       const box = $('sres'); if (box) box.innerHTML = searchHTML();

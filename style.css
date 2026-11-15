@@ -196,3 +196,25 @@ main{padding:12px 14px 8px}
 .folds{font-size:12px;color:var(--pri);margin-left:auto;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .caret{font-style:normal;font-size:12px;color:var(--tx3);transform:rotate(-90deg);transition:transform .15s}
 .caret.open{transform:rotate(0)}
+
+/* 背名词解释 */
+.memoentry{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;margin:0 0 4px;
+  background:linear-gradient(180deg,#f0fdfa,#fff);border:1px solid var(--pri);border-radius:12px;padding:12px;font:inherit;text-align:left;color:inherit}
+.mcard{background:#fff;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
+.mcard.open{border-color:#bfe3d4;box-shadow:0 1px 3px rgba(15,118,110,.06)}
+.mhead{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;background:#fff;border:0;padding:13px 14px;font:inherit;text-align:left;color:inherit}
+.mterm{font-size:15px;font-weight:600;color:var(--tx);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.men{font-size:11px;font-weight:400;color:var(--tx3)}
+.mcnt{margin-left:auto;font-size:11px;font-weight:400;color:var(--pri);background:var(--pri-weak);border-radius:6px;padding:2px 6px;white-space:nowrap}
+.msub{font-size:11px;color:var(--tx3);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mans{padding:0 14px 12px;border-top:1px dashed var(--line);margin-top:0}
+.mstrike{font-size:11px;color:var(--tx3);margin:10px 0 6px}
+.mans p{margin:0;font-size:14px;line-height:1.75;color:var(--tx);white-space:pre-wrap}
+.mvar{margin-top:8px !important;font-size:12.5px !important;color:var(--tx3) !important}
+.mhead2{display:flex;align-items:center;justify-content:space-between;width:100%;background:#fafbfc;border:0;border-top:1px solid var(--line);
+  padding:10px 14px;font:inherit;font-size:12px;color:var(--tx2)}
+.mdetail{padding:4px 14px 12px;background:#fafbfc}
+.mrow{padding:10px 0;border-top:1px dashed var(--line)}
+.mrowtop{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--tx3)}
+.mstem{font-size:13px;font-weight:600;color:var(--tx);margin:6px 0 4px}
+.mraw{font-size:12.5px;line-height:1.7;color:var(--tx2);white-space:pre-wrap}

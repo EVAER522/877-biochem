@@ -305,3 +305,9 @@ main{padding:12px 14px 8px}
 .dirbtn{width:30px;height:28px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--tx2);font-size:14px;line-height:1;flex:none;margin-left:auto}
 .dirbtn:active{background:#f2f6f4}
 .sortstat{font-size:10.5px;color:var(--tx3);display:flex;align-items:center;gap:5px;margin:0 0 12px}
+
+/* 纠错编辑器 */
+.field textarea,.field select{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:14px;background:#fafbfc;font-family:inherit;line-height:1.65;box-sizing:border-box}
+.field textarea{resize:vertical}
+.field textarea:focus,.field select:focus{outline:none;border-color:var(--pri)}
+.linkbtn{background:none;border:0;color:var(--tx2);font-size:12px;padding:4px 2px}

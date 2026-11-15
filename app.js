@@ -8,6 +8,7 @@
     auto: 'qb.auto', rec: u => 'qb.rec.' + u, sess: u => 'qb.sess.' + u, mem: u => 'qb.mem.' + u
   };
   const COLORS = ['#0f766e', '#9a3412', '#4338ca'];
+  const CUR_VER = (function () { const t = document.querySelector('script[src*="app.js?v="]'); return t ? (t.getAttribute('src').split('?v=')[1] || '') : ''; })();
   const RATE_TXT = { forgot: '忘记', vague: '模糊', known: '熟悉' };
   const LIST_NAME = { fav: '我的收藏', forgot: '忘记的题', vague: '模糊待巩固', known: '已熟悉', weak: '未掌握', done: '已练过的题', today: '今日刷的题', all: '全部题目' };
 
@@ -628,7 +629,7 @@
     </div>
     <div class="card" style="margin-top:12px">
       <div class="h1" style="font-size:15px">数据概览</div>
-      <div class="muted" style="line-height:1.9">题库 ${BANK.length} 题 · 已练 ${Object.keys(p).length} 题 · 收藏 ${S.rec.fav.length} 题<br/>日志文件：logs/${esc(S.user || 'user')}.json</div>
+      <div class="muted" style="line-height:1.9">题库 ${BANK.length} 题 · 已练 ${Object.keys(p).length} 题 · 收藏 ${S.rec.fav.length} 题<br/>日志文件：logs/${esc(S.user || 'user')}.json<br/>版本：${esc(CUR_VER)}</div>
     </div>
     <div class="muted" style="margin:14px 4px;line-height:1.7">题目与答案来自南航 877 历年真题整理，仅供本人复习使用。</div>`;
   }

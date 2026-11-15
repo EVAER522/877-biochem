@@ -187,3 +187,12 @@ main{padding:12px 14px 8px}
 .agnum.forgot{background:#fdeee7;border-color:#f6cdb9;color:#b3441a}
 .agnum.cur{box-shadow:0 0 0 2px var(--pri) inset;color:var(--pri);font-weight:600;background:#fff}
 .agstar{position:absolute;right:3px;top:2px;font-size:9px;color:#f0a020;font-style:normal}
+
+/* 折叠筛选 */
+.foldh{display:flex;align-items:center;gap:8px;width:100%;background:#fff;border:0;border-bottom:1px solid var(--line);
+  padding:12px 2px;font:inherit;text-align:left}
+.foldh:active{background:#fafbfc}
+.foldt{font-size:13px;font-weight:600;color:var(--tx2)}
+.folds{font-size:12px;color:var(--pri);margin-left:auto;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.caret{font-style:normal;font-size:12px;color:var(--tx3);transform:rotate(-90deg);transition:transform .15s}
+.caret.open{transform:rotate(0)}

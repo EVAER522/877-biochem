@@ -14,6 +14,7 @@
   const S = {
     user: '', rec: { u: '', updated: 0, progress: {}, fav: [], sessions: [] }, tab: 'quiz', view: 'setup',
     filter: { tp: '', chap: '', kp: '', scope: 'all', order: 'seq' },
+    fold: { tp: true, chap: true, kp: true },
     queue: [], idx: 0, phase: 'ask', revealed: {}, picked: null,
     session: null, token: '', repo: 'EVAER522/877-biochem', branch: 'main',
     auto: true, snap: null, sw: '', custom: '', listKind: 'fav', syncAt: 0, syncErr: '', sync: { state: 'idle', msg: '' }, _syncTimer: null, _syncing: false
@@ -254,6 +255,9 @@
     const tpCnt = {}; BANK.forEach(q => { const g = tpGroup(q); tpCnt[g] = (tpCnt[g] || 0) + 1; });
     const tpChips = [`<button class="chip ${!f.tp ? 'on' : ''}" data-act="tp" data-v="">全部<span class="n">${BANK.length}</span></button>`]
       .concat(TP_ORDER.map(t => `<button class="chip ${f.tp === t ? 'on' : ''}" data-act="tp" data-v="${t}">${t}${t === '名词' ? '解释' : t === '大题' ? '（问答·计算）' : ''}<span class="n">${tpCnt[t] || 0}</span></button>`)).join('');
+    const chName = f.chap ? shortName(((CHS.find(c => c.id === f.chap)) || {}).name || '') : '全部章节';
+    const foldHead = (k, title, summary) => `<button class="foldh" data-act="fold" data-v="${k}">
+      <span class="foldt">${title}</span><span class="folds">${esc(summary)}</span><i class="caret ${S.fold[k] ? '' : 'open'}">▾</i></button>`;
     const scopes = [['all', '全部题'], ['weak', '未掌握'], ['forgot', '只刷忘记'], ['vague', '模糊待巩固'], ['fav', '我的收藏']];
     const scopeChips = scopes.map(([v, t]) => `<button class="chip ${f.scope === v ? 'on' : ''}" data-act="scope" data-v="${v}">${t}</button>`).join('');
     const cnt = buildQueue().length;
@@ -295,10 +299,14 @@
         ${[['fav', '收藏'], ['forgot', '忘记'], ['vague', '模糊'], ['known', '熟悉'], ['weak', '未掌握']].map(([k, n]) =>
       `<button class="chip" data-act="listOpen" data-v="${k}">${n}<span class="n">${listQueue(k).length}</span></button>`).join('')}
       </div>
-      <div class="section-label">按题型<span class="muted" style="font-weight:400;font-size:11px"> 名词解释与大题可单独整块刷</span></div>
-      <div class="row wrap">${tpChips}</div>
-      <div class="section-label">按章节</div><div class="row wrap">${chapChips}</div>
-      ${f.chap ? `<div class="section-label">按考点</div><div class="row wrap">${kpChips}</div>` : ''}
+      <div style="margin-top:14px">
+        ${foldHead('tp', '按题型', f.tp || '全部')}
+        ${S.fold.tp ? '' : `<div class="row wrap" style="margin:10px 0 4px">${tpChips}</div>`}
+        ${foldHead('chap', '按章节', chName)}
+        ${S.fold.chap ? '' : `<div class="row wrap" style="margin:10px 0 4px">${chapChips}</div>`}
+        ${foldHead('kp', '按考点', f.chap ? (f.kp || '全部考点') : '先选章节')}
+        ${S.fold.kp || !f.chap ? '' : `<div class="row wrap" style="margin:10px 0 4px">${kpChips}</div>`}
+      </div>
       <div class="section-label">范围</div><div class="row wrap">${scopeChips}</div>
       <div class="section-label">顺序</div>
       <div class="row wrap">
@@ -711,6 +719,7 @@
     if (el) {
       const act = el.dataset.act, v = el.dataset.v, i = el.dataset.i;
       switch (act) {
+        case 'fold': S.fold[v] = !S.fold[v]; render(); return;
         case 'tp': S.filter.tp = v; S.filter.chap = ''; S.filter.kp = ''; render(); return;
         case 'chap': S.filter.chap = v; S.filter.kp = ''; render(); return;
         case 'kp': S.filter.kp = v; render(); return;

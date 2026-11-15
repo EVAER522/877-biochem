@@ -271,9 +271,11 @@ main{padding:12px 14px 8px}
 .qn.sub{font-size:12px;font-weight:400;color:var(--tx3);margin-top:8px}
 
 /* 背名词：熟练度标记与排行 */
-.mcard.r-forgot{box-shadow:inset 4px 0 0 #f0743a}
-.mcard.r-vague{box-shadow:inset 4px 0 0 #f0a020}
-.mcard.r-known{box-shadow:inset 4px 0 0 var(--pri)}
+.mcard{position:relative}
+.mcard.r-forgot::before,.mcard.r-vague::before,.mcard.r-known::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;z-index:2;border-radius:12px 0 0 12px}
+.mcard.r-forgot::before{background:#f0743a}
+.mcard.r-vague::before{background:#f0a020}
+.mcard.r-known::before{background:var(--pri)}
 .mrate{display:flex;align-items:center;gap:6px;padding:0 14px 11px}
 .mrlab{font-size:11px;color:var(--tx3);margin-right:2px}
 .mbtn{font-size:11.5px;padding:5px 10px;border-radius:999px;border:1px solid var(--line);background:#fafbfc;color:var(--tx2)}

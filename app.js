@@ -686,7 +686,7 @@
     const open = !!S.mo[g.key], open2 = !!S.mo2[g.key];
     const ansMain = g.ansVars[0] || '';
     const others = g.ansVars.slice(1);
-    return `<div class="mcard ${open ? 'open' : ''}">
+    return `<div class="mcard ${open ? 'open' : ''} ${S.mem[g.key] ? 'r-' + S.mem[g.key].r : ''}">
       <button class="mhead" data-act="memoOpen" data-v="${g.idx}">
         <div style="min-width:0">
           <div class="mterm">${esc(g.zh)}${g.en ? `<span class="men">${esc(g.en)}</span>` : ''}<span class="mcnt">${g.items.length} 次</span></div>

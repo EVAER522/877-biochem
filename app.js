@@ -472,7 +472,9 @@
     const rated = S.rated;
     return `
     <div class="progress"><i id="qbar"></i></div>
-    <div class="backrow"><button class="backbtn" data-act="home">‹ 首页</button><span class="bk-sub">${esc(q.chname)}${st ? ' · 上次：' + RATE_TXT[st.r] : ''}${S.ephemeral ? ' · 临时' : ''}</span></div>
+    <div class="backrow"><button class="backbtn" data-act="home">‹ 首页</button>
+      <span class="bk-sub">${esc(q.chname)}${st ? ' · 上次：' + RATE_TXT[st.r] : ''}${S.ephemeral ? ' · 临时' : ''}</span>
+      <button class="backbtn" style="margin-left:auto;white-space:nowrap" data-act="cardSheet">答题卡 ${S.idx + 1}/${S.queue.length}</button></div>
     <div class="card">
       <div class="qhead">
         <div class="qmeta"><span class="badge pri">${esc(q.kp)}</span><span class="badge">${q.y}年 · ${esc(q.ty)}${esc(q.num)}</span></div>
@@ -572,6 +574,26 @@
     $('sheet').classList.add('show'); $('sheetMask').classList.add('show');
   }
   function closeSheet() { $('sheet').classList.remove('show'); $('sheetMask').classList.remove('show'); }
+  function cardSheet() {
+    const p = S.rec.progress || {};
+    const groups = [['forgot', '忘记'], ['vague', '模糊'], ['known', '熟悉']];
+    const stat = { forgot: 0, vague: 0, known: 0, none: 0 };
+    S.queue.forEach(q => { const r = p[q.id] && p[q.id].r; if (r) stat[r]++; else stat.none++; });
+    const cells = S.queue.map((q, i) => {
+      const r = p[q.id] && p[q.id].r;
+      const cls = i === S.idx ? 'cur' : (r || '');
+      const fav = (S.rec.fav || []).includes(q.id);
+      return `<button class="agnum ${cls}" data-act="goto" data-i="${i}">${i + 1}${fav ? '<i class="agstar">★</i>' : ''}</button>`;
+    }).join('');
+    openSheet(`<h3>答题卡</h3>
+      <div class="agbar"><b>第 ${S.idx + 1} 题 / 共 ${S.queue.length}</b>
+        <span class="aglegend">${groups.map(([k, n]) => `<i class="agdot ${k}"></i>${n} ${stat[k]}`).join(' ')}<i class="agdot"></i>未做 ${stat.none}</span></div>
+      <div class="aggrid">${cells}</div>
+      <div class="row" style="margin-top:14px;gap:8px">
+        <button class="btn" style="flex:1" data-act="gotoNextNone">跳到下一道未做</button>
+        <button class="btn ghost" style="flex:1" data-act="closeSheet">关闭</button>
+      </div>`);
+  }
   function statusSheet() {
     const st = S.sync, dot = st.state === 'ok' ? 'ok' : st.state === 'warn' ? 'warn' : 'off';
     const txt = { ok: '已同步', warn: '同步中／待同步', off: '仅本地（未配置令牌）', idle: '未同步' }[st.state] || '未同步';
@@ -634,6 +656,11 @@
     S.session = { t: now(), scope: label || ((lb.tp ? lb.tp + ' · ' : '') + lb.ch + ' · ' + lb.kp + ' · ' + lb.sc), n: 0, forgot: 0, vague: 0, known: 0, correct: 0, wrong: 0 };
     S.view = 'quiz'; S.tab = 'quiz'; render(); saveSess();
   }
+  function jumpTo(i) {
+    if (!S.queue.length || i < 0 || i >= S.queue.length) return;
+    S.idx = i; S.phase = 'ask'; S.revealed = {}; S.picked = null; S.rated = null; S.correctFlag = null;
+    S.view = 'quiz'; render(); saveSess();
+  }
   function resumeSession() {
     const s = snapInfo();
     if (!s) { toast('没有可继续的进度'); return; }
@@ -692,6 +719,13 @@
         case 'start': startSession(); return;
         case 'clearSearch': S.sw = ''; render(); return;
         case 'home': S.view = 'setup'; S.tab = 'quiz'; render(); return;
+        case 'cardSheet': cardSheet(); return;
+        case 'closeSheet': closeSheet(); return;
+        case 'goto': { const gi = parseInt(i === undefined ? v : i, 10); if (!isNaN(gi)) jumpTo(gi); closeSheet(); return; }
+        case 'gotoNextNone': { const p = S.rec.progress || {}; const from = S.idx + 1; let k = -1;
+          for (let j = from; j < S.queue.length; j++) { if (!p[S.queue[j].id]) { k = j; break; } }
+          if (k < 0) for (let j = 0; j < from; j++) { if (!p[S.queue[j].id]) { k = j; break; } }
+          if (k < 0) { toast('这一组都做过了'); return; } jumpTo(k); closeSheet(); return; }
         case 'listOpen': S.listKind = v; S.view = 'lists'; S.tab = 'quiz'; render(); return;
         case 'openListQ': {
           const list = listQueue(S.listKind);

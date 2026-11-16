@@ -331,3 +331,9 @@ main{padding:12px 14px 8px}
 .switch.on{background:var(--pri)}
 .switch i{position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.18);transition:left .18s}
 .switch.on i{left:23px}
+
+/* 纠错里的同题 */
+.sibrow{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--line)}
+.sibrow:first-of-type{border-top:0}
+.sibrow input{width:18px;height:18px;margin-top:2px;accent-color:var(--pri);flex:0 0 auto}
+.sibrow .k{font-size:12px;color:var(--tx2)}

@@ -59,13 +59,14 @@
   let FIXES = {};
   const SUBJ_TY = t => /填空|名词|问答|简答|论述|计算/.test(t || '');
   function baseOf(q) {
-    if (!q.__base) q.__base = { ans: q.ans, correct: q.correct, pts: (q.pts || []).slice() };
+    if (!q.__base) q.__base = { ans: q.ans, correct: q.correct, pts: (q.pts || []).slice(), stem: q.stem };
     return q.__base;
   }
   function applyFix(q) {
     const b = baseOf(q);
-    q.ans = b.ans; q.correct = b.correct; q.pts = b.pts.slice();
+    q.ans = b.ans; q.correct = b.correct; q.pts = b.pts.slice(); q.stem = b.stem;
     const f = FIXES[q.id]; if (!f) return;
+    if (typeof f.s === 'string' && f.s) q.stem = f.s;
     if (f.c) q.correct = f.c;
     if (typeof f.a === 'string') q.ans = f.a.indexOf('｜考点') >= 0 ? f.a : (f.a + (q.kp ? '｜考点：' + q.kp : ''));
     if (Array.isArray(f.pts)) q.pts = f.pts.slice();
@@ -1018,13 +1019,14 @@
   function fixState(q) {
     const raw = q.ans || '';
     S.fix = {
-      id: q.id, stage: 'edit', c: q.correct || '',
+      id: q.id, stage: 'edit', c: q.correct || '', stem: q.stem || '', oldStem: q.stem || '',
       ans: raw.split('｜考点')[0],
       blocks: SUBJ_TY(q.ty) ? ((q.pts && q.pts.length) ? q.pts.slice() : []) : []
     };
   }
   function collectFix() {
     if (!S.fix) return;
+    const st = $('fixStem'); if (st) S.fix.stem = st.value;
     const a = $('fixAns'); if (a) S.fix.ans = a.value;
     const c = $('fixC'); if (c) S.fix.c = c.value;
     const bs = Array.from(document.querySelectorAll('.fixblk')).map(t => t.value);
@@ -1060,7 +1062,7 @@
         <div class="muted" style="margin-top:6px">块数越多遮盖越细；建议每块 1–2 句。</div></div>`;
     }
     return `<h3>纠错 · ${esc(q.y)}年 ${esc(q.ty)}${esc(q.num)}</h3>
-      <div class="desc">${esc((q.stem || '').slice(0, 80))}${(q.stem || '').length > 80 ? '…' : ''}</div>
+      <div class="field"><label>题干</label><textarea id="fixStem" rows="5">${esc(S.fix.stem)}</textarea></div>
       ${pick}
       <div class="field"><label>答案文本（不含“考点”）</label><textarea id="fixAns" rows="${subj ? 6 : 2}">${esc(S.fix.ans)}</textarea></div>
       ${blocksHTML}
@@ -1075,6 +1077,7 @@
     const oldAns = (q.ans || '').split('｜考点')[0];
     const oldBlocks = (q.pts || []).slice();
     let cChanged = !!(S.fix.c && S.fix.c !== oldC);
+    let stemChanged = String(S.fix.stem || '').trim() !== String(q.stem || '').trim();
     let ansChanged = S.fix.ans.trim() !== oldAns.trim();
     let blocksChanged = SUBJ_TY(q.ty) && S.fix.blocks.filter(t => String(t).trim()).join('') !== oldBlocks.join('');
     if (SUBJ_TY(q.ty)) {
@@ -1088,15 +1091,17 @@
       S.fix.ans = S.fix.ans.replace(/^[ABCD]/,'')
       S.fix.ans = S.fix.c + (optText(q, S.fix.c) ? `（${optText(q, S.fix.c)}）` : '');
     }
-    return { cChanged, ansChanged, blocksChanged, oldC, oldAns, oldBlocks };
+    return { cChanged, ansChanged, blocksChanged, stemChanged, oldC, oldAns, oldBlocks };
   }
   function optText(q, k) { const i = 'ABCD'.indexOf(k); return (q.opts || [])[i] || ''; }
   function diffFix(q) {
     const d = normalizeFix(q);
     const rows = [];
+    if (d.stemChanged) rows.push(`题干已修改（${String(q.stem || '').length} → ${String(S.fix.stem).trim().length} 字）`);
     if (d.cChanged) rows.push(`正确项：${esc(d.oldC || '—')} → <b>${esc(S.fix.c)}</b>`);
     if (d.ansChanged) rows.push(`答案正文已修改（${d.oldAns.length} → ${S.fix.ans.length} 字）`);
     if (d.blocksChanged) rows.push(`遮挡块：${d.oldBlocks.length} 块 → <b>${S.fix.blocks.filter(t => String(t).trim()).length}</b> 块`);
+    if (d.stemChanged) rows.push(`<div style="color:var(--tx2);margin-top:6px">提交后的题干：${esc(String(S.fix.stem).trim().slice(0, 90))}${String(S.fix.stem).trim().length > 90 ? '…' : ''}</div>`);
     if (rows.length) rows.push(`<div style="color:var(--tx2);margin-top:6px">提交后的答案：${esc(S.fix.ans.slice(0, 90))}${S.fix.ans.length > 90 ? '…' : ''}</div>`);
     return rows;
   }
@@ -1114,6 +1119,8 @@
     normalizeFix(q);   // 再兜一次，保证“正文/遮挡块/正确项”一致
     if (!S.token) { toast('未配置令牌，无法写回题库'); tokenSheet(); return; }
     const entry = { a: S.fix.ans, u: S.user || '', ts: now() };
+    const newStem = String(S.fix.stem || '').trim();
+    if (newStem && newStem !== String(q.stem || '').trim()) entry.s = newStem;
     if (S.fix.c) entry.c = S.fix.c;
     if (SUBJ_TY(q.ty)) entry.pts = S.fix.blocks.filter(t => String(t).trim());
     try {
@@ -1122,7 +1129,7 @@
       if (cur && cur.text) { try { obj = JSON.parse(cur.text) || {}; } catch (e) { obj = {}; } }
       obj[q.id] = entry;
       await api.write('fixes.json', JSON.stringify(obj, null, 1), 'fix: 纠错 ' + q.id + (S.user ? ' by ' + S.user : ''), cur && cur.sha);
-      FIXES = obj; saveJSON('qb.fixes', FIXES); applyFix(q);
+      FIXES = obj; saveJSON('qb.fixes', FIXES); applyFix(q); if (typeof rebuildHay === 'function') rebuildHay();
       closeSheet(); S.fix = null; S.revealed = {}; render(); toast('已提交，题库已更新');
     } catch (e) {
       const msg = e && e.code === 'no_token' ? '未配置令牌' : (e && e.message || '未知错误');

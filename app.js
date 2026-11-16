@@ -503,9 +503,10 @@
         <button class="segbtn ${f.order === 'seq' ? 'on' : ''}" data-act="order" data-v="seq">按年份</button>
         <button class="segbtn ${f.order === 'random' ? 'on' : ''}" data-act="order" data-v="random">随机</button>
       </div>
-      <div class="row" style="justify-content:space-between;margin-top:10px">
-        <button class="linkbtn" data-act="dedupOpen">重复题去重 ›</button>
-        <span class="k">${dupInfo(false).extra ? '可去重 ' + dupInfo(false).extra + ' 条' : '无重复'}${HIDDEN.size ? ' · 已隐藏 ' + HIDDEN.size : ''}</span>
+      <div class="row" style="justify-content:space-between;margin-top:10px;gap:8px">
+        <button class="linkbtn" data-act="dedupOpen" style="text-align:left">重复题去重
+          <span class="badge" style="margin-left:4px;${HIDDEN.size ? 'background:var(--pri-weak);color:var(--pri)' : 'background:#f2f4f6;color:var(--tx2)'}">${HIDDEN.size ? '已开启' : '未开启'}</span> ›</button>
+        <span class="k" style="text-align:right">${HIDDEN.size ? `隐藏 ${HIDDEN.size} 条 · 现有 ${BANK.length} 题` : `检测到 ${dupInfo(false).groups.length} 组 · 可隐藏 ${dupInfo(false).extra} 条`}</span>
       </div>
       <button class="btn block ctabtn" data-act="start" ${cnt ? '' : 'disabled style="opacity:.45"'}>开始刷题（${cnt}）</button>
     </div>
@@ -1005,6 +1006,9 @@
     }).join('');
     const extra = shown.reduce((n, g) => n + g.items.length - 1, 0);
     return `<h3>重复题去重</h3>
+      <div class="card" style="padding:10px 12px;margin-top:4px;background:${HIDDEN.size ? 'var(--pri-weak)' : '#f6f8fa'}">
+        <b style="font-size:13px;color:${HIDDEN.size ? 'var(--pri)' : 'var(--tx2)'}">${HIDDEN.size ? '当前状态：已去重，隐藏了 ' + HIDDEN.size + ' 条，题库共 ' + BANK.length + ' 题' : '当前状态：未去重，题库共 ' + BANK.length + ' 题（全部重复题都在刷题里出现）'}</b>
+      </div>
       <div class="desc">同一道题在不同年份反复出现，这里每组只留一版（点亮的那条），其余在刷题、搜题里隐藏。背诵用的名词解释默认不参与。</div>
       <div class="row" style="justify-content:space-between;margin-top:10px">
         <button class="chip ${S.dup.includeNoun ? 'on' : ''}" data-act="dupNoun">${S.dup.includeNoun ? '✓ ' : ''}名词解释也去重</button>

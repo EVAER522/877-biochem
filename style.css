@@ -311,3 +311,10 @@ main{padding:12px 14px 8px}
 .field textarea{resize:vertical}
 .field textarea:focus,.field select:focus{outline:none;border-color:var(--pri)}
 .linkbtn{background:none;border:0;color:var(--tx2);font-size:12px;padding:4px 2px}
+
+/* 题下笔记 */
+.card.notes{padding:14px}
+.noteitem{border-top:1px solid var(--line);padding:10px 0}
+.noteitem:first-of-type{border-top:0}
+.noteuser{font-size:13px;color:var(--pri)}
+.notetext{margin-top:4px;line-height:1.75;white-space:pre-wrap;word-break:break-word}

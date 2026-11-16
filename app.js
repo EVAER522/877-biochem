@@ -642,15 +642,13 @@
         <button class="btn ${rated === 'known' ? 'on' : ''}" data-r="known" data-act="rate">熟悉</button>
       </div>
       ${showAns ? `<div class="rate-hint">${S.auto ? '选完自动下一题' : '选完点下方按钮进入下一题'}</div>` : `<div class="rate-hint">先自己作答，再显示答案</div>`}
-      <div class="row" style="justify-content:space-between;margin-top:2px">
-        <button class="linkbtn" data-act="noteOpen">笔记${(NOTES[q.id] || []).length ? ' ' + NOTES[q.id].length : ''} ›</button>
-        <button class="linkbtn" data-act="fixOpen">答案有问题？纠错 ›</button>
-      </div>
+      <div style="text-align:right;margin-top:2px"><button class="linkbtn" data-act="fixOpen">答案有问题？纠错 ›</button></div>
       <div class="row" style="margin-top:14px;gap:8px">
         <button class="btn ghost" style="flex:1" data-act="prev">上一题</button>
         <button class="btn ghost" style="flex:1" data-act="skip">跳过/下一题</button>
       </div>
     </div>
+    ${notesInlineHTML(q)}
     <div class="muted" style="margin:10px 4px">${esc(q.chname)} · ${esc(q.kp)}${st ? ' · 上次：' + RATE_TXT[st.r] : ''}</div>`;
   }
 
@@ -925,6 +923,36 @@
       <div class="field"><label>分支</label><input id="br" value="${esc(S.branch)}"/></div>
       <button class="btn block" data-act="saveRepo">保存</button>`);
   }
+  /* ---------- 笔记（题下内嵌，默认展开） ---------- */
+  function noteDraftOf(q) {
+    const d = loadJSON('qb.noteDraft', {}) || {};
+    if (d[q.id] !== undefined) return d[q.id];
+    const mine = (NOTES[q.id] || []).filter(n => (n.u || '') === (S.user || ''));
+    return mine.length ? mine[mine.length - 1].t : '';
+  }
+  function setNoteDraft(qid, v) {
+    const d = loadJSON('qb.noteDraft', {}) || {}; d[qid] = v; saveJSON('qb.noteDraft', d);
+  }
+  function notesInlineHTML(q) {
+    const list = NOTES[q.id] || [];
+    const rows = list.map(n => `<div class="noteitem">
+        <div class="row" style="justify-content:space-between">
+          <b class="noteuser">${esc(n.u || '匿名')}</b>
+          <span class="k">${new Date(n.ts || 0).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}${(n.u || '') === (S.user || '') ? `<button class="linkbtn" style="margin-left:8px" data-act="noteDel" data-ts="${n.ts}">删除</button>` : ''}</span>
+        </div>
+        <div class="notetext">${esc(n.t || '')}</div>
+      </div>`).join('');
+    return `<div class="card notes" style="margin-top:12px">
+      <div class="row" style="justify-content:space-between">
+        <div class="h1" style="margin:0;font-size:14px">笔记${list.length ? ` · ${list.length}` : ''}</div>
+        <span class="k">所有人可见 · 署名「${esc(S.user || '未命名')}」</span>
+      </div>
+      ${rows}
+      <div class="field" style="margin:10px 0 0"><textarea id="noteInline" rows="3" placeholder="记易错点、口诀、这题的关键逻辑…（发布后所有使用者可见）">${esc(noteDraftOf(q))}</textarea></div>
+      <button class="btn block" style="margin-top:8px" data-act="noteSave">发布笔记</button>
+    </div>`;
+  }
+
   /* ---------- 笔记面板 ---------- */
   function noteHTML(q) {
     const list = NOTES[q.id] || [];
@@ -948,7 +976,8 @@
   }
   async function saveNote() {
     const q = S.queue[S.idx]; if (!q) return;
-    const txt = ($('noteTxt').value || '').trim();
+    const box = $('noteInline') || $('noteTxt');
+    const txt = (box && box.value || '').trim();
     if (!txt) { toast('先写点内容'); return; }
     if (!S.token) { toast('未配置令牌，无法发布'); tokenSheet(); return; }
     const entry = { u: S.user || '匿名', t: txt, ts: now() };
@@ -962,7 +991,9 @@
       await api.write('notes.json', JSON.stringify(obj, null, 1), 'note: ' + q.id + ' by ' + (S.user || ''), cur && cur.sha);
       NOTES = mergeNotes(NOTES, { [q.id]: [entry] });
       NOTES[q.id] = list;
-      saveJSON('qb.notes', NOTES); closeSheet(); render(); toast('笔记已发布');
+      saveJSON('qb.notes', NOTES);
+      const dr = loadJSON('qb.noteDraft', {}) || {}; delete dr[q.id]; saveJSON('qb.noteDraft', dr);
+      render(); toast('笔记已发布');
     } catch (e) {
       toast('发布失败：' + ((e && e.message) || '未知错误'));
       if (e && e.status === 401) { closeSheet(); tokenSheet(); }
@@ -1176,6 +1207,11 @@
   }
 
   /* ---------- events ---------- */
+  document.addEventListener('input', e => {
+    const t = e.target;
+    if (t && t.id === 'noteInline') { const q = S.queue[S.idx]; if (q) setNoteDraft(q.id, t.value); }
+  }, true);
+
   document.addEventListener('click', async e => {
     const el = e.target.closest('[data-act]');
     if (el) {

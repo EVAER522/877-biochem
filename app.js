@@ -503,11 +503,14 @@
         <button class="segbtn ${f.order === 'seq' ? 'on' : ''}" data-act="order" data-v="seq">按年份</button>
         <button class="segbtn ${f.order === 'random' ? 'on' : ''}" data-act="order" data-v="random">随机</button>
       </div>
-      <div class="row" style="justify-content:space-between;margin-top:10px;gap:8px">
-        <button class="linkbtn" data-act="dedupOpen" style="text-align:left">重复题去重
-          <span class="badge" style="margin-left:4px;${HIDDEN.size ? 'background:var(--pri-weak);color:var(--pri)' : 'background:#f2f4f6;color:var(--tx2)'}">${HIDDEN.size ? '已开启' : '未开启'}</span> ›</button>
-        <span class="k" style="text-align:right">${HIDDEN.size ? `隐藏 ${HIDDEN.size} 条 · 现有 ${BANK.length} 题` : `检测到 ${dupInfo(false).groups.length} 组 · 可隐藏 ${dupInfo(false).extra} 条`}</span>
+      <div class="duprow">
+        <div>
+          <div class="duptitle">重复题去重 <span class="badge" style="${HIDDEN.size ? 'background:var(--pri-weak);color:var(--pri)' : 'background:#f2f4f6;color:var(--tx2)'}">${HIDDEN.size ? '已开启' : '未开启'}</span></div>
+          <div class="dupdesc">${HIDDEN.size ? `隐藏 ${HIDDEN.size} 条 · 现有 ${BANK.length} 题 · 名词解释未动` : `${dupInfo(false).groups.length} 组重复 · 开启后留最早年份，隐藏 ${dupInfo(false).extra} 条`}</div>
+        </div>
+        <button class="switch ${HIDDEN.size ? 'on' : ''}" data-act="dupToggle" aria-label="重复题去重"><i></i></button>
       </div>
+      <button class="linkbtn" data-act="dedupOpen" style="margin-top:6px">逐组查看、改留哪一条 ›</button>
       <button class="btn block ctabtn" data-act="start" ${cnt ? '' : 'disabled style="opacity:.45"'}>开始刷题（${cnt}）</button>
     </div>
     <div class="card">
@@ -1407,6 +1410,17 @@
         }
         case 'showAns': S.phase = 'revealed'; render(); return;
         case 'fixOpen': { const q = S.queue[S.idx]; if (q) fixSheet(q); return; }
+        case 'dupToggle': {
+          if (HIDDEN.size) { HIDDEN = new Set(); await saveDedup(true); render(); toast('已关闭去重，题库恢复 ' + BANK.length + ' 题'); return; }
+          const info = dupInfo(false);
+          info.groups.forEach(g => {
+            const sorted = g.items.slice().sort((a, b) => (a.y || '').localeCompare(b.y || ''));
+            const keepId = sorted[0].id;
+            g.items.forEach(q => { if (q.id !== keepId) HIDDEN.add(q.id); });
+          });
+          await saveDedup(); render(); toast('已开启去重，题库剩 ' + BANK.length + ' 题');
+          return;
+        }
         case 'dedupOpen': S.dup = null; openSheet(dedupHTML()); return;
         case 'dupNoun': S.dup.includeNoun = !S.dup.includeNoun; S.dup.keep = {}; openSheet(dedupHTML()); return;
         case 'dupKeep': {

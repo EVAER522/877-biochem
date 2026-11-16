@@ -1,6 +1,8 @@
 /* 877生化速刷 — 移动端刷题 */
 (function () {
   const BANK = window.QBANK || [];
+  const ALLQ = BANK.slice();          // 全量题库（去重后会从 BANK 中移除，但这里始终保留）
+  let HIDDEN = new Set();             // 被去重隐藏的题号
   const CHS = window.CHAPTERS || [];
   const KPS = window.KPS || [];
   const LS = {
@@ -107,6 +109,60 @@
     if (JSON.stringify(merged) !== JSON.stringify(FIXES)) {
       FIXES = merged; saveJSON('qb.fixes', FIXES); applyFixes(); if (S.view) render();
     }
+  }
+
+  /* ---------- 重复题去重（全库同题干只留一版） ---------- */
+  const dupNorm = t => String(t == null ? '' : t).replace(/[\s\u3000（）()【】\[\]，,。.、；;：:？?！!“”"'’‘\-—_/\\]/g, '').toLowerCase();
+  function detectDups(includeNoun) {
+    const map = new Map();
+    ALLQ.forEach(q => {
+      if (!includeNoun && q.ty === '名词') return;
+      const k = dupNorm(q.stem); if (!k || k.length < 6) return;
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(q);
+    });
+    const groups = [];
+    map.forEach((list, k) => { if (list.length > 1) groups.push({ key: k, items: list }); });
+    groups.sort((a, b) => b.items.length - a.items.length);
+    return groups;
+  }
+  function dupInfo(includeNoun) {
+    const g = detectDups(includeNoun);
+    return { groups: g, extra: g.reduce((n, x) => n + x.items.length - 1, 0) };
+  }
+  function isHidden(id) { return HIDDEN.has(id); }
+  function applyDedup() {
+    const keep = ALLQ.filter(q => !HIDDEN.has(q.id));
+    BANK.length = 0; keep.forEach(q => BANK.push(q));
+    S._memo = null;
+    if (typeof rebuildHay === 'function') rebuildHay();
+  }
+  function loadDedupCache() {
+    const d = loadJSON('qb.dedup', null) || {};
+    HIDDEN = new Set(d.hidden || []);
+    applyDedup();
+  }
+  async function loadDedupRemote() {
+    const [a, b] = await Promise.all([fetchFixFile('./dedup.json?t=' + now()), fetchFixFile(api.raw('dedup.json') + '?t=' + now())]);
+    const list = (a && a.hidden) || (b && b.hidden) || [];
+    if (!list.length) return;
+    let changed = false;
+    list.forEach(id => { if (!HIDDEN.has(id)) { HIDDEN.add(id); changed = true; } });
+    if (changed) { saveJSON('qb.dedup', { hidden: [...HIDDEN] }); applyDedup(); if (S.view) render(); }
+  }
+  async function saveDedup(reset) {
+    const payload = { hidden: [...HIDDEN], updated: now() };
+    saveJSON('qb.dedup', payload);
+    if (!S.token) { applyDedup(); return; }
+    try {
+      const cur = await api.read('dedup.json');
+      let remote = {};
+      if (cur && cur.text) { try { remote = JSON.parse(cur.text) || {}; } catch (e) { remote = {}; } }
+      const merged = reset ? payload.hidden : [...new Set([...(remote.hidden || []), ...payload.hidden])];
+      payload.hidden = merged; HIDDEN = new Set(merged);
+      await api.write('dedup.json', JSON.stringify(payload, null, 1), 'dedup: 隐藏重复题 ' + merged.length + ' 条', cur && cur.sha);
+    } catch (e) { toast('同步失败：' + ((e && e.message) || '未知错误')); }
+    applyDedup();
   }
 
   /* ---------- 共享笔记（跨用户可见，随日志同步） ---------- */
@@ -446,6 +502,10 @@
       <div class="seg">
         <button class="segbtn ${f.order === 'seq' ? 'on' : ''}" data-act="order" data-v="seq">按年份</button>
         <button class="segbtn ${f.order === 'random' ? 'on' : ''}" data-act="order" data-v="random">随机</button>
+      </div>
+      <div class="row" style="justify-content:space-between;margin-top:10px">
+        <button class="linkbtn" data-act="dedupOpen">重复题去重 ›</button>
+        <span class="k">${dupInfo(false).extra ? '可去重 ' + dupInfo(false).extra + ' 条' : '无重复'}${HIDDEN.size ? ' · 已隐藏 ' + HIDDEN.size : ''}</span>
       </div>
       <button class="btn block ctabtn" data-act="start" ${cnt ? '' : 'disabled style="opacity:.45"'}>开始刷题（${cnt}）</button>
     </div>
@@ -924,6 +984,39 @@
       <div class="field"><label>分支</label><input id="br" value="${esc(S.branch)}"/></div>
       <button class="btn block" data-act="saveRepo">保存</button>`);
   }
+  /* ---------- 重复题去重面板 ---------- */
+  function dedupHTML() {
+    if (!S.dup) S.dup = { includeNoun: false, keep: {} };
+    const info = dupInfo(S.dup.includeNoun);
+    if (!Object.keys(S.dup.keep).length) {
+      info.groups.forEach(g => {   // 默认保留最早年份，同年取先出现的
+        const sorted = g.items.slice().sort((a, b) => (a.y || '') - (b.y || ''));
+        S.dup.keep[g.key] = sorted[0].id;
+      });
+    }
+    const shown = info.groups;
+    const rows = shown.map((g, gi) => {
+      const keep = S.dup.keep[g.key] || g.items[0].id;
+      const tags = g.items.map(q => `<button class="dupchip ${q.id === keep ? 'on' : ''}" data-act="dupKeep" data-key="${esc(g.key)}" data-id="${esc(q.id)}">${esc(q.y)}·${esc(q.ty)}${esc(q.num)}</button>`).join('');
+      return `<div class="card" style="margin-top:10px;padding:12px 14px">
+        <div class="muted" style="font-size:12px;line-height:1.6">${esc((g.items[0].stem || '').slice(0, 46))}${(g.items[0].stem || '').length > 46 ? '…' : ''}</div>
+        <div class="row wrap" style="margin-top:8px;gap:6px">${tags}</div>
+      </div>`;
+    }).join('');
+    const extra = shown.reduce((n, g) => n + g.items.length - 1, 0);
+    return `<h3>重复题去重</h3>
+      <div class="desc">同一道题在不同年份反复出现，这里每组只留一版（点亮的那条），其余在刷题、搜题里隐藏。背诵用的名词解释默认不参与。</div>
+      <div class="row" style="justify-content:space-between;margin-top:10px">
+        <button class="chip ${S.dup.includeNoun ? 'on' : ''}" data-act="dupNoun">${S.dup.includeNoun ? '✓ ' : ''}名词解释也去重</button>
+        <span class="k" id="dupCount">${shown.length} 组 · 将隐藏 ${extra} 条</span>
+      </div>
+      <div style="margin-top:8px">${rows || '<div class="muted">没有检测到重复题</div>'}</div>
+      <button class="btn block" style="margin-top:14px" data-act="dupApply">应用去重（隐藏 ${extra} 条）</button>
+      ${HIDDEN.size ? `<button class="btn ghost block" style="margin-top:8px" data-act="dupReset">恢复已隐藏的 ${HIDDEN.size} 条</button>` : ''}
+      <button class="btn ghost block" style="margin-top:8px" data-act="closeSheet">关闭</button>
+      <div class="desc" style="margin-top:12px">组内默认留最早年份；点其它年份可改留哪一条。写入仓库 dedup.json，所有设备同步。</div>`;
+  }
+
   /* ---------- 笔记（题下内嵌，默认展开） ---------- */
   function noteDraftOf(q) {
     const d = loadJSON('qb.noteDraft', {}) || {};
@@ -1310,6 +1403,33 @@
         }
         case 'showAns': S.phase = 'revealed'; render(); return;
         case 'fixOpen': { const q = S.queue[S.idx]; if (q) fixSheet(q); return; }
+        case 'dedupOpen': S.dup = null; openSheet(dedupHTML()); return;
+        case 'dupNoun': S.dup.includeNoun = !S.dup.includeNoun; S.dup.keep = {}; openSheet(dedupHTML()); return;
+        case 'dupKeep': {
+          const k = el.dataset.key, id = el.dataset.id;
+          S.dup.keep[k] = id;
+          el.parentNode.querySelectorAll('.dupchip').forEach(x => x.classList.toggle('on', x === el));
+          const info = dupInfo(S.dup.includeNoun);
+          const extra = info.groups.reduce((n, g) => n + g.items.length - 1, 0);
+          const c = $('dupCount'); if (c) c.textContent = info.groups.length + ' 组 · 将隐藏 ' + extra + ' 条';
+          return;
+        }
+        case 'dupApply': {
+          const info = dupInfo(S.dup.includeNoun);
+          info.groups.forEach(g => {
+            const keep = S.dup.keep[g.key];
+            g.items.forEach(q => { if (q.id !== keep) HIDDEN.add(q.id); });
+          });
+          await saveDedup();
+          closeSheet(); S.dup = null; render(); toast('已去重，题库剩 ' + BANK.length + ' 题');
+          return;
+        }
+        case 'dupReset': {
+          HIDDEN = new Set();
+          await saveDedup(true);
+          closeSheet(); S.dup = null; render(); toast('已恢复全部题目');
+          return;
+        }
         case 'noteOpen': { const q = S.queue[S.idx]; if (q) openSheet(noteHTML(q)); return; }
         case 'noteSave': await saveNote(); return;
         case 'noteDel': await delNote(Number(el.dataset.ts)); return;
@@ -1427,9 +1547,10 @@
     if (cur.indexOf('\\"') >= 0) cur = cur.replace(/\\?"/g, '');
     applyFixesCache();                 // 修复：同步读缓存，先保证题库是校订后的
     applyNotesCache();                 // 笔记也先读缓存
-    if (!cur) { render(); userSheet(); loadRemoteIndex(); loadFixesRemote(); loadNotesRemote(); return; }
+    loadDedupCache();                  // 去重：同步读缓存，先按已去重的题库渲染
+    if (!cur) { render(); userSheet(); loadRemoteIndex(); loadFixesRemote(); loadNotesRemote(); loadDedupRemote(); return; }
     setUser(cur, true);                // 先用本地记录渲染，不等网络
-    loadRemoteIndex(); loadFixesRemote(); loadNotesRemote();
+    loadRemoteIndex(); loadFixesRemote(); loadNotesRemote(); loadDedupRemote();
     if (S.token) pullFromRepo(cur, true); else setSync('off', '仅本地（未配置令牌）');
   }
   window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveSess(); });

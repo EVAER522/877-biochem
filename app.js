@@ -1115,6 +1115,13 @@
     } catch (e) { toast('删除失败：' + ((e && e.message) || '未知错误')); }
   }
 
+  /* 同题/近似同题：题干归一化后相同 */
+  function dupSiblings(q) {
+    const k = dupNorm(q.stem);
+    if (!k || k.length < 6) return [];
+    return ALLQ.filter(x => x.id !== q.id && dupNorm(x.stem) === k);
+  }
+
   /* ---------- 纠错编辑器 ---------- */
   function fixState(q) {
     const raw = q.ans || '';
@@ -1129,6 +1136,7 @@
     const st = $('fixStem'); if (st) S.fix.stem = st.value;
     const a = $('fixAns'); if (a) S.fix.ans = a.value;
     const c = $('fixC'); if (c) S.fix.c = c.value;
+    S.fix.batch = Array.from(document.querySelectorAll('.fixdup')).filter(c => c.checked).map(c => c.value);
     const bs = Array.from(document.querySelectorAll('.fixblk')).map(t => t.value);
     if (bs.length) S.fix.blocks = bs;
   }
@@ -1166,10 +1174,31 @@
       ${pick}
       <div class="field"><label>答案文本（不含“考点”）</label><textarea id="fixAns" rows="${subj ? 6 : 2}">${esc(S.fix.ans)}</textarea></div>
       ${blocksHTML}
+      ${fixSibHTML(q)}
       <button class="btn block" data-act="fixSubmit">提交修改</button>
       <button class="btn ghost block" style="margin-top:8px" data-act="fixCancel">取消</button>
       <div class="desc" style="margin-top:12px">提交后会写回 GitHub 仓库的 fixes.json，所有设备打开页面时自动生效；不影响本机刷题记录。</div>`;
   }
+  function fixSibHTML(q) {
+    const sibs = dupSiblings(q);
+    if (!sibs.length) return '';
+    const base = String(q.ans || '').split('｜考点')[0].replace(/\s/g, '');
+    const rows = sibs.map(x => {
+      const same = String(x.ans || '').split('｜考点')[0].replace(/\s/g, '') === base && (x.correct || '') === (q.correct || '');
+      return `<label class="sibrow">
+        <input type="checkbox" class="fixdup" value="${esc(x.id)}" ${same ? '' : 'checked'}>
+        <div>
+          <div><b>${esc(x.y)}年 ${esc(x.ty)}${esc(x.num)}</b> <span class="badge" style="${same ? 'background:#f2f4f6;color:var(--tx2)' : 'background:#fdeee7;color:var(--forgot)'}">${same ? '与本题一致' : '与本题不同'}</span></div>
+          <div class="k" style="margin-top:2px">现答案：${esc(String(x.ans || '—').split('｜考点')[0].slice(0, 46))}${x.correct ? '（' + esc(x.correct) + '）' : ''}</div>
+        </div></label>`;
+    }).join('');
+    return `<div class="field" style="margin-top:12px">
+      <label>同题还出现在 ${sibs.length} 处，勾选的一并改成一模一样</label>
+      <div class="muted" style="margin:2px 0 8px;font-size:12px">默认只勾“与本题不同”的；一致的不必重复提交。</div>
+      ${rows}
+    </div>`;
+  }
+
   const splitSent = t => String(t || '').split(/(?<=[。；;])/).map(x => x.trim()).filter(Boolean);
   /* 核心：主观题“答案正文”和“遮挡块”只能有一个真源，谁被改就以谁为准，避免刷新后显示旧内容 */
   function normalizeFix(q) {
@@ -1201,6 +1230,7 @@
     if (d.cChanged) rows.push(`正确项：${esc(d.oldC || '—')} → <b>${esc(S.fix.c)}</b>`);
     if (d.ansChanged) rows.push(`答案正文已修改（${d.oldAns.length} → ${S.fix.ans.length} 字）`);
     if (d.blocksChanged) rows.push(`遮挡块：${d.oldBlocks.length} 块 → <b>${S.fix.blocks.filter(t => String(t).trim()).length}</b> 块`);
+    if (S.fix.batch && S.fix.batch.length) rows.push(`同时修改 <b>${S.fix.batch.length}</b> 道同题：${S.fix.batch.map(id => esc(id)).join('、')}`);
     if (d.stemChanged) rows.push(`<div style="color:var(--tx2);margin-top:6px">提交后的题干：${esc(String(S.fix.stem).trim().slice(0, 90))}${String(S.fix.stem).trim().length > 90 ? '…' : ''}</div>`);
     if (rows.length) rows.push(`<div style="color:var(--tx2);margin-top:6px">提交后的答案：${esc(S.fix.ans.slice(0, 90))}${S.fix.ans.length > 90 ? '…' : ''}</div>`);
     return rows;
@@ -1227,10 +1257,14 @@
       const cur = await api.read('fixes.json');
       let obj = {};
       if (cur && cur.text) { try { obj = JSON.parse(cur.text) || {}; } catch (e) { obj = {}; } }
+      const batch = (S.fix.batch || []).filter(id => id !== q.id);
       obj[q.id] = entry;
-      await api.write('fixes.json', JSON.stringify(obj, null, 1), 'fix: 纠错 ' + q.id + (S.user ? ' by ' + S.user : ''), cur && cur.sha);
-      FIXES = obj; saveJSON('qb.fixes', FIXES); applyFix(q); if (typeof rebuildHay === 'function') rebuildHay();
-      closeSheet(); S.fix = null; S.revealed = {}; render(); toast('已提交，题库已更新');
+      batch.forEach(id => { obj[id] = Object.assign({}, entry); });
+      await api.write('fixes.json', JSON.stringify(obj, null, 1), 'fix: 纠错 ' + q.id + (batch.length ? ' + ' + batch.length + ' 同题' : '') + (S.user ? ' by ' + S.user : ''), cur && cur.sha);
+      FIXES = obj; saveJSON('qb.fixes', FIXES);
+      applyFix(q); batch.forEach(id => { const x = BANK.find(y => y.id === id); if (x) applyFix(x); });
+      if (typeof rebuildHay === 'function') rebuildHay();
+      closeSheet(); S.fix = null; S.revealed = {}; render(); toast(batch.length ? '已提交，含 ' + batch.length + ' 道同题' : '已提交，题库已更新');
     } catch (e) {
       const msg = e && e.code === 'no_token' ? '未配置令牌' : (e && e.message || '未知错误');
       toast('提交失败：' + msg);

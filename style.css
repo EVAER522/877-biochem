@@ -318,3 +318,7 @@ main{padding:12px 14px 8px}
 .noteitem:first-of-type{border-top:0}
 .noteuser{font-size:13px;color:var(--pri)}
 .notetext{margin-top:4px;line-height:1.75;white-space:pre-wrap;word-break:break-word}
+
+/* 去重 */
+.dupchip{padding:6px 10px;border:1px solid var(--line);background:#fff;border-radius:999px;font-size:12px;color:var(--tx2)}
+.dupchip.on{border-color:var(--pri);background:var(--pri-weak);color:var(--pri);font-weight:600}

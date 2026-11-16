@@ -108,6 +108,37 @@
     }
   }
 
+  /* ---------- 共享笔记（跨用户可见，随日志同步） ---------- */
+  let NOTES = {};
+  function noteKey(n) { return (n.u || '') + '|' + (n.ts || 0); }
+  function mergeNotes(a, b) {
+    const out = {};
+    ['a', 'b'].forEach(() => {});
+    const ids = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+    ids.forEach(id => {
+      const map = new Map();
+      ((a || {})[id] || []).forEach(n => map.set(noteKey(n), n));
+      ((b || {})[id] || []).forEach(n => {
+        const k = noteKey(n); const cur = map.get(k);
+        if (!cur || (n.ts || 0) > (cur.ts || 0)) map.set(k, n);
+      });
+      const list = Array.from(map.values()).sort((x, y) => (x.ts || 0) - (y.ts || 0));
+      if (list.length) out[id] = list;
+    });
+    return out;
+  }
+  function applyNotesCache() { NOTES = loadJSON('qb.notes', null) || {}; }
+  async function loadNotesRemote() {
+    const [viaPages, viaRaw] = await Promise.all([
+      fetchFixFile('./notes.json?t=' + now()),
+      fetchFixFile(api.raw('notes.json') + '?t=' + now())
+    ]);
+    const merged = mergeNotes(mergeNotes(NOTES, viaPages || {}), viaRaw || {});
+    if (JSON.stringify(merged) !== JSON.stringify(NOTES)) {
+      NOTES = merged; saveJSON('qb.notes', NOTES); if (S.view) render();
+    }
+  }
+
   function b64e(str) {
     const bytes = new TextEncoder().encode(str); let bin = '';
     const chunk = 0x8000;
@@ -611,7 +642,10 @@
         <button class="btn ${rated === 'known' ? 'on' : ''}" data-r="known" data-act="rate">熟悉</button>
       </div>
       ${showAns ? `<div class="rate-hint">${S.auto ? '选完自动下一题' : '选完点下方按钮进入下一题'}</div>` : `<div class="rate-hint">先自己作答，再显示答案</div>`}
-      <div style="text-align:right;margin-top:2px"><button class="linkbtn" data-act="fixOpen">答案有问题？纠错 ›</button></div>
+      <div class="row" style="justify-content:space-between;margin-top:2px">
+        <button class="linkbtn" data-act="noteOpen">笔记${(NOTES[q.id] || []).length ? ' ' + NOTES[q.id].length : ''} ›</button>
+        <button class="linkbtn" data-act="fixOpen">答案有问题？纠错 ›</button>
+      </div>
       <div class="row" style="margin-top:14px;gap:8px">
         <button class="btn ghost" style="flex:1" data-act="prev">上一题</button>
         <button class="btn ghost" style="flex:1" data-act="skip">跳过/下一题</button>
@@ -891,6 +925,64 @@
       <div class="field"><label>分支</label><input id="br" value="${esc(S.branch)}"/></div>
       <button class="btn block" data-act="saveRepo">保存</button>`);
   }
+  /* ---------- 笔记面板 ---------- */
+  function noteHTML(q) {
+    const list = NOTES[q.id] || [];
+    const mine = list.filter(n => (n.u || '') === (S.user || ''));
+    const rows = list.map(n => `<div class="card" style="margin-top:10px;padding:12px 14px">
+        <div class="row" style="justify-content:space-between">
+          <b style="font-size:13px;color:var(--pri)">${esc(n.u || '匿名')}</b>
+          <span class="k">${new Date(n.ts || 0).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+        </div>
+        <div style="margin-top:6px;line-height:1.75;white-space:pre-wrap">${esc(n.t || '')}</div>
+        ${(n.u || '') === (S.user || '') ? `<div style="text-align:right"><button class="linkbtn" data-act="noteDel" data-ts="${n.ts}">删除</button></div>` : ''}
+      </div>`).join('');
+    const last = mine.length ? mine[mine.length - 1].t : '';
+    return `<h3>笔记 · ${esc(q.y)}年 ${esc(q.ty)}${esc(q.num)}</h3>
+      <div class="desc">这里的笔记对所有使用者可见，署名是你的用户名「${esc(S.user || '未命名')}」。同一题可多人叠加。</div>
+      ${rows || '<div class="muted" style="margin-top:10px">还没有人写过这题，来写第一条。</div>'}
+      <div class="field" style="margin-top:14px"><label>${last ? '补充或修改你的笔记' : '写笔记'}</label>
+        <textarea id="noteTxt" rows="4" placeholder="记易错点、口诀、和这题相关的联系…">${esc(last)}</textarea></div>
+      <button class="btn block" data-act="noteSave">发布笔记</button>
+      <button class="btn ghost block" style="margin-top:8px" data-act="closeSheet">关闭</button>`;
+  }
+  async function saveNote() {
+    const q = S.queue[S.idx]; if (!q) return;
+    const txt = ($('noteTxt').value || '').trim();
+    if (!txt) { toast('先写点内容'); return; }
+    if (!S.token) { toast('未配置令牌，无法发布'); tokenSheet(); return; }
+    const entry = { u: S.user || '匿名', t: txt, ts: now() };
+    try {
+      const cur = await api.read('notes.json');
+      let obj = {};
+      if (cur && cur.text) { try { obj = JSON.parse(cur.text) || {}; } catch (e) { obj = {}; } }
+      obj = mergeNotes(obj, NOTES);
+      const list = (obj[q.id] || []).filter(n => (n.u || '') !== entry.u);   // 每人每题保留最新一条，旧的可改
+      list.push(entry); obj[q.id] = list;
+      await api.write('notes.json', JSON.stringify(obj, null, 1), 'note: ' + q.id + ' by ' + (S.user || ''), cur && cur.sha);
+      NOTES = mergeNotes(NOTES, { [q.id]: [entry] });
+      NOTES[q.id] = list;
+      saveJSON('qb.notes', NOTES); closeSheet(); render(); toast('笔记已发布');
+    } catch (e) {
+      toast('发布失败：' + ((e && e.message) || '未知错误'));
+      if (e && e.status === 401) { closeSheet(); tokenSheet(); }
+    }
+  }
+  async function delNote(ts) {
+    const q = S.queue[S.idx]; if (!q || !S.token) { toast('未配置令牌'); return; }
+    try {
+      const cur = await api.read('notes.json');
+      let obj = (cur && cur.text) ? JSON.parse(cur.text) : {};
+      obj = mergeNotes(obj, NOTES);
+      obj[q.id] = (obj[q.id] || []).filter(n => !((n.u || '') === (S.user || '') && n.ts === ts));
+      if (!obj[q.id].length) delete obj[q.id];
+      await api.write('notes.json', JSON.stringify(obj, null, 1), 'note: 删除笔记 ' + q.id, cur && cur.sha);
+      NOTES = mergeNotes(NOTES, {}); NOTES[q.id] = obj[q.id] || [];
+      if (!NOTES[q.id].length) delete NOTES[q.id];
+      saveJSON('qb.notes', NOTES); openSheet(noteHTML(q)); render(); toast('已删除');
+    } catch (e) { toast('删除失败：' + ((e && e.message) || '未知错误')); }
+  }
+
   /* ---------- 纠错编辑器 ---------- */
   function fixState(q) {
     const raw = q.ans || '';
@@ -1175,6 +1267,9 @@
         }
         case 'showAns': S.phase = 'revealed'; render(); return;
         case 'fixOpen': { const q = S.queue[S.idx]; if (q) fixSheet(q); return; }
+        case 'noteOpen': { const q = S.queue[S.idx]; if (q) openSheet(noteHTML(q)); return; }
+        case 'noteSave': await saveNote(); return;
+        case 'noteDel': await delNote(Number(el.dataset.ts)); return;
         case 'fixCancel': closeSheet(); S.fix = null; return;
         case 'fixSubmit': {
           collectFix();
@@ -1288,9 +1383,10 @@
     if (cur.charAt(0) === '"') { try { cur = JSON.parse(cur); } catch (e) { cur = cur.replace(/^"|"$/g, ''); } }
     if (cur.indexOf('\\"') >= 0) cur = cur.replace(/\\?"/g, '');
     applyFixesCache();                 // 修复：同步读缓存，先保证题库是校订后的
-    if (!cur) { render(); userSheet(); loadRemoteIndex(); loadFixesRemote(); return; }
+    applyNotesCache();                 // 笔记也先读缓存
+    if (!cur) { render(); userSheet(); loadRemoteIndex(); loadFixesRemote(); loadNotesRemote(); return; }
     setUser(cur, true);                // 先用本地记录渲染，不等网络
-    loadRemoteIndex(); loadFixesRemote();
+    loadRemoteIndex(); loadFixesRemote(); loadNotesRemote();
     if (S.token) pullFromRepo(cur, true); else setSync('off', '仅本地（未配置令牌）');
   }
   window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveSess(); });

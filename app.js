@@ -975,7 +975,7 @@
       <div class="statline"><span class="dot ${dot}"></span><b>${title}</b>
       <div class="desc">${st.state === 'fail' && S.syncErr
           ? '失败原因：' + esc(S.syncErr).replace(/\n/g, '<br>')
-          : (st.state === 'ok' ? '' : esc(st.msg || ''))}${when ? '<br>最近成功同步：' + when : '<br>还没有成功同步过'}</div></div>
+          : (st.state === 'ok' || !st.msg || st.msg === title || st.msg.indexOf(title) === 0 ? '' : esc(st.msg))}${when ? '<br>最近成功同步：' + when : '<br>还没有成功同步过'}</div></div>
       <div class="list">
         <div class="item" data-act="switchUser"><div><div>当前用户</div><div class="k">${esc(S.user || '未选择')}</div></div><div>切换 ›</div></div>
         <div class="item" data-act="tokenSheet"><div><div>同步令牌</div><div class="k">${S.token ? '已配置，日志写入 ' + esc(S.repo) : '未配置，只存本机'}</div></div><div>›</div></div>

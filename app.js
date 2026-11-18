@@ -69,6 +69,7 @@
     q.ans = b.ans; q.correct = b.correct; q.pts = b.pts.slice(); q.stem = b.stem;
     const f = FIXES[q.id]; if (!f) return;
     if (typeof f.s === 'string' && f.s) q.stem = f.s;
+    if (f.s) q.__dn = undefined;
     if (f.c) q.correct = f.c;
     if (typeof f.a === 'string') q.ans = f.a.indexOf('｜考点') >= 0 ? f.a : (f.a + (q.kp ? '｜考点：' + q.kp : ''));
     if (Array.isArray(f.pts)) q.pts = f.pts.slice();
@@ -113,11 +114,14 @@
 
   /* ---------- 重复题去重（全库同题干只留一版） ---------- */
   const dupNorm = t => String(t == null ? '' : t).replace(/[\s\u3000（）()【】\[\]，,。.、；;：:？?！!“”"'’‘\-—_/\\]/g, '').toLowerCase();
+  const normOf = q => (q.__dn === undefined ? (q.__dn = dupNorm(q.stem)) : q.__dn);   // 每题只算一次
+  let DUP_CACHE = {};
+  function clearDupCache() { DUP_CACHE = {}; }
   function detectDups(includeNoun) {
     const map = new Map();
     ALLQ.forEach(q => {
       if (!includeNoun && q.ty === '名词') return;
-      const k = dupNorm(q.stem); if (!k || k.length < 6) return;
+      const k = normOf(q); if (!k || k.length < 6) return;
       if (!map.has(k)) map.set(k, []);
       map.get(k).push(q);
     });
@@ -127,11 +131,15 @@
     return groups;
   }
   function dupInfo(includeNoun) {
+    const key = includeNoun ? 'on' : 'off';
+    if (DUP_CACHE[key]) return DUP_CACHE[key];
     const g = detectDups(includeNoun);
-    return { groups: g, extra: g.reduce((n, x) => n + x.items.length - 1, 0) };
+    DUP_CACHE[key] = { groups: g, extra: g.reduce((n, x) => n + x.items.length - 1, 0) };
+    return DUP_CACHE[key];
   }
   function isHidden(id) { return HIDDEN.has(id); }
   function applyDedup() {
+    clearDupCache();
     const keep = ALLQ.filter(q => !HIDDEN.has(q.id));
     BANK.length = 0; keep.forEach(q => BANK.push(q));
     S._memo = null;
@@ -150,19 +158,22 @@
     list.forEach(id => { if (!HIDDEN.has(id)) { HIDDEN.add(id); changed = true; } });
     if (changed) { saveJSON('qb.dedup', { hidden: [...HIDDEN] }); applyDedup(); if (S.view) render(); }
   }
-  async function saveDedup(reset) {
+  function saveDedup(reset) {
     const payload = { hidden: [...HIDDEN], updated: now() };
-    saveJSON('qb.dedup', payload);
-    if (!S.token) { applyDedup(); return; }
+    saveJSON('qb.dedup', payload);           // 本地即时生效
+    applyDedup();
+    if (S.token) syncDedup(payload, reset);  // 网络写回放后台，不挡界面
+  }
+  async function syncDedup(payload, reset) {
     try {
       const cur = await api.read('dedup.json');
       let remote = {};
       if (cur && cur.text) { try { remote = JSON.parse(cur.text) || {}; } catch (e) { remote = {}; } }
       const merged = reset ? payload.hidden : [...new Set([...(remote.hidden || []), ...payload.hidden])];
-      payload.hidden = merged; HIDDEN = new Set(merged);
+      payload.hidden = merged;
       await api.write('dedup.json', JSON.stringify(payload, null, 1), 'dedup: 隐藏重复题 ' + merged.length + ' 条', cur && cur.sha);
+      // 只做并集，不反向改本地：避免把本机刚关掉的状态拉回来
     } catch (e) { toast('同步失败：' + ((e && e.message) || '未知错误')); }
-    applyDedup();
   }
 
   /* ---------- 共享笔记（跨用户可见，随日志同步） ---------- */
@@ -1445,14 +1456,14 @@
         case 'showAns': S.phase = 'revealed'; render(); return;
         case 'fixOpen': { const q = S.queue[S.idx]; if (q) fixSheet(q); return; }
         case 'dupToggle': {
-          if (HIDDEN.size) { HIDDEN = new Set(); await saveDedup(true); render(); toast('已关闭去重，题库恢复 ' + BANK.length + ' 题'); return; }
+          if (HIDDEN.size) { HIDDEN = new Set(); saveDedup(true); render(); toast('已关闭去重，题库恢复 ' + BANK.length + ' 题'); return; }
           const info = dupInfo(false);
           info.groups.forEach(g => {
             const sorted = g.items.slice().sort((a, b) => (a.y || '').localeCompare(b.y || ''));
             const keepId = sorted[0].id;
             g.items.forEach(q => { if (q.id !== keepId) HIDDEN.add(q.id); });
           });
-          await saveDedup(); render(); toast('已开启去重，题库剩 ' + BANK.length + ' 题');
+          saveDedup(); render(); toast('已开启去重，题库剩 ' + BANK.length + ' 题');
           return;
         }
         case 'dedupOpen': S.dup = null; openSheet(dedupHTML()); return;
@@ -1472,13 +1483,13 @@
             const keep = S.dup.keep[g.key];
             g.items.forEach(q => { if (q.id !== keep) HIDDEN.add(q.id); });
           });
-          await saveDedup();
+          saveDedup();
           closeSheet(); S.dup = null; render(); toast('已去重，题库剩 ' + BANK.length + ' 题');
           return;
         }
         case 'dupReset': {
           HIDDEN = new Set();
-          await saveDedup(true);
+          saveDedup(true);
           closeSheet(); S.dup = null; render(); toast('已恢复全部题目');
           return;
         }

@@ -271,8 +271,8 @@
   }
   function mergeRec(local, remote) {
     const out = blankRec(local.u || remote.u);
-    out.sessions = local.sessions.slice();
-    remote.sessions.forEach(rs => { if (!out.sessions.some(x => x.t === rs.t)) out.sessions.push(rs); });
+    out.sessions = (local.sessions || []).slice();
+    (remote.sessions || []).forEach(rs => { if (!out.sessions.some(x => x.t === rs.t)) out.sessions.push(rs); });
     out.sessions.sort((a, b) => a.t - b.t);
     out.favTs = { ...(remote.favTs || {}) }; Object.entries(local.favTs || {}).forEach(([k, v]) => { if ((v || 0) > (out.favTs[k] || 0)) out.favTs[k] = v; });
     out.favDel = { ...(remote.favDel || {}) }; Object.entries(local.favDel || {}).forEach(([k, v]) => { if ((v || 0) > (out.favDel[k] || 0)) out.favDel[k] = v; });
@@ -300,18 +300,18 @@
       saveJSON(LS.rec(u), S.rec);
       setSync('ok', S.token ? '已同步 ' + hhmm(now()) : '已读取远端');
     } catch (e) {
-      setSync('warn', '读取失败：' + e.message);
+      setSync('fail', '读取失败：' + e.message);
     }
   }
   function scheduleSync() {
     if (!S.token || !S.user) { setSync(S.token ? 'idle' : 'off', S.token ? '待同步' : '仅本地'); return; }
-    setSync('warn', '待同步…');
+    setSync('pending', '有改动，等待写入');
     clearTimeout(S._syncTimer);
     S._syncTimer = setTimeout(pushToRepo, 4000);
   }
   async function pushToRepo() {
     if (!S.token || !S.user || S._syncing) return;
-    S._syncing = true; setSync('warn', '同步中…');
+    S._syncing = true; setSync('sync', '正在写入仓库…');
     const path = `logs/${encodeURIComponent(S.user)}.json`;
     try {
       const cur = await api.read(path);
@@ -324,7 +324,7 @@
       setSync('ok', '已同步 ' + hhmm(now()));
     } catch (e) {
       if (e.code === 'no_token') setSync('off', '仅本地');
-      else setSync('warn', '同步失败：' + e.message + '\n' + syncErrText(e));
+      else setSync('fail', e.message + (syncErrText(e) ? '\n' + syncErrText(e) : ''));
     } finally { S._syncing = false; }
   }
   function syncErrText(e) {
@@ -337,10 +337,10 @@
     return '';
   }
   function setSync(st, msg) {
-    S.sync = { state: st, msg: msg || '' };
-    S.syncAt = st === 'ok' ? now() : (S.syncAt || 0);
-    if (st === 'warn') S.syncErr = msg || '';
-    const dot = $('syncDot'); if (dot) { dot.className = 'dot ' + (st === 'ok' ? 'ok' : st === 'warn' ? 'warn' : st === 'off' ? 'off' : ''); dot.title = msg || ''; }
+    S.sync = { state: st, msg: msg || '', at: now() };
+    if (st === 'ok') { S.syncAt = now(); S.syncErr = ''; }
+    if (st === 'fail') S.syncErr = msg || '';
+    const dot = $('syncDot'); if (dot) { const c = st === 'ok' ? 'ok' : st === 'off' ? 'off' : 'warn'; dot.className = 'dot ' + c; dot.title = msg || ''; }
   }
 
   /* ---------- users ---------- */
@@ -964,11 +964,18 @@
       <div id="mlist">${memListHTML()}</div>`;
   }
   function statusSheet() {
-    const st = S.sync, dot = st.state === 'ok' ? 'ok' : st.state === 'warn' ? 'warn' : 'off';
-    const txt = { ok: '已同步', warn: '同步中／待同步', off: '仅本地（未配置令牌）', idle: '未同步' }[st.state] || '未同步';
+    const st = S.sync || { state: 'idle', msg: '' };
+    const dot = st.state === 'ok' ? 'ok' : st.state === 'off' ? 'off' : 'warn';
+    const title = {
+      ok: '已同步，无待写改动', sync: '正在同步…', pending: '有改动未写入（稍后自动同步）',
+      fail: '同步失败', off: '仅本地（未配置令牌）', idle: '尚未同步'
+    }[st.state] || '尚未同步';
+    const when = S.syncAt ? new Date(S.syncAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
     openSheet(`<h3>同步状态</h3>
-      <div class="statline"><span class="dot ${dot}"></span><b>${txt}</b>
-      <div class="desc">${esc(st.msg || '')}${S.syncAt ? '<br>最近成功：' + new Date(S.syncAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}${S.syncErr ? '<br>错误：' + esc(S.syncErr).replace(/\n/g, '<br>') : ''}</div></div>
+      <div class="statline"><span class="dot ${dot}"></span><b>${title}</b>
+      <div class="desc">${st.state === 'fail' && S.syncErr
+          ? '失败原因：' + esc(S.syncErr).replace(/\n/g, '<br>')
+          : (st.state === 'ok' ? '' : esc(st.msg || ''))}${when ? '<br>最近成功同步：' + when : '<br>还没有成功同步过'}</div></div>
       <div class="list">
         <div class="item" data-act="switchUser"><div><div>当前用户</div><div class="k">${esc(S.user || '未选择')}</div></div><div>切换 ›</div></div>
         <div class="item" data-act="tokenSheet"><div><div>同步令牌</div><div class="k">${S.token ? '已配置，日志写入 ' + esc(S.repo) : '未配置，只存本机'}</div></div><div>›</div></div>

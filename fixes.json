@@ -299,5 +299,20 @@
    "(b) 赛后乳酸经乳酸循环转运到肝脏，转化为丙酮酸，再通过糖异生生成葡萄糖，乳酸浓度降低。",
    "下降更慢：糖异生耗能、反应步骤多；乳酸脱氢酶 LDH反应偏向生成乳酸，逆反应受限，整体速率远低于无氧糖酵解。"
   ]
+ },
+ "2013-大3": {
+  "a": "1.乳酸的代谢途径乳酸(C3H6O3)首先转化为丙酮酸，然后丙酮酸进入线粒体参与三羧酸循环进行完全氧化，最终生成CO2和H2O。 主要步骤： (1) 乳酸→丙酮酸：生成1molNADH(在线粒体外，通过苹果酸穿梭系统进入线粒体，1molNADH相当于2.5molATP)。 (2) 丙酮酸→乙酰辅酶A：生成1molNADH(相当于2.5molATP)。 (3) 乙酰辅酶A进入三羧酸循环： 生成3molNADH(相当于7.5molATP) 生成1molFADH2(相当于1.5molATP) 生成1molGTP(相当于1molATP) ； 2.计算ATP总产量 每1mol乳酸完全氧化时，产生的ATP如下： (1) 乳酸→丙酮酸：生成1molNADH=2.5molATP。 (2) 丙酮酸→乙酰辅酶A：生成1molNADH=2.5molATP。 (3) 三羧酸循环： 生成3molNADH=7.5molATP生成1molFADH2=1.5molATP生成1molATP(GTP等效) 3.总ATP生成量乳酸→丙酮酸：2.5molATP； (4) 丙酮酸→乙酰辅酶A：2.5molATP三羧酸循环：7.5molATP(NADH)+1.5molATP(FADH2)+1molATP=10molATP总生成ATP：2.5+2.5+10=15molATP",
+  "u": "董子昂",
+  "ts": 1795097949798,
+  "pts": [
+   "1.乳酸的代谢途径乳酸(C3H6O3)首先转化为丙酮酸，然后丙酮酸进入线粒体参与三羧酸循环进行完全氧化，最终生成CO2和H2O。",
+   "主要步骤： (1) 乳酸→丙酮酸：生成1molNADH(在线粒体外，通过苹果酸穿梭系统进入线粒体，1molNADH相当于2.5molATP)。",
+   "(2) 丙酮酸→乙酰辅酶A：生成1molNADH(相当于2.5molATP)。",
+   "(3) 乙酰辅酶A进入三羧酸循环： 生成3molNADH(相当于7.5molATP) 生成1molFADH2(相当于1.5molATP) 生成1molGTP(相当于1molATP) ；",
+   "2.计算ATP总产量 每1mol乳酸完全氧化时，产生的ATP如下： (1) 乳酸→丙酮酸：生成1molNADH=2.5molATP。",
+   "(2) 丙酮酸→乙酰辅酶A：生成1molNADH=2.5molATP。",
+   "(3) 三羧酸循环： 生成3molNADH=7.5molATP生成1molFADH2=1.5molATP生成1molATP(GTP等效) 3.总ATP生成量乳酸→丙酮酸：2.5molATP；",
+   "(4) 丙酮酸→乙酰辅酶A：2.5molATP三羧酸循环：7.5molATP(NADH)+1.5molATP(FADH2)+1molATP=10molATP总生成ATP：2.5+2.5+10=15molATP"
+  ]
  }
 }

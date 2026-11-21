@@ -589,14 +589,37 @@
       <div class="muted" style="margin:8px 0 16px">刷题时点右上角 ☆ 收藏，或做自评标记后就会出现在这里</div>
       <button class="btn block" data-act="home">返回首页</button></div>`;
     const p = S.rec.progress || {};
-    return `<div class="backrow"><button class="backbtn" data-act="home">‹ 首页</button>
-      <span class="bk-sub">${LIST_NAME[kind]} · ${list.length} 题</span></div>
-      <div class="card" style="padding:4px 16px">
-      ${list.map(q => `<button class="qrow" data-act="openListQ" data-v="${esc(q.id)}">
+    // 按章节分组（顺序跟章节表一致）
+    const groups = [];
+    const byChap = new Map();
+    list.forEach(q => { if (!byChap.has(q.chap)) { const g = { chap: q.chap, name: q.chname || q.chap, items: [] }; byChap.set(q.chap, g); groups.push(g); } byChap.get(q.chap).items.push(q); });
+    const order = (CHS || []).map(c => c.id);
+    groups.sort((a, b) => order.indexOf(a.chap) - order.indexOf(b.chap));
+    const cur = S.listChap || '';
+    const chips = `<div class="row wrap" style="gap:6px;margin:8px 0 2px">
+      <button class="chip ${cur === '' ? 'on' : ''}" data-act="listChap" data-v="">全部 ${list.length}</button>
+      ${groups.map(g => `<button class="chip ${cur === g.chap ? 'on' : ''}" data-act="listChap" data-v="${esc(g.chap)}">${esc(shortName(g.name))} ${g.items.length}</button>`).join('')}
+    </div>`;
+    const shown = cur ? groups.filter(g => g.chap === cur) : groups;
+    const qrow = q => `<button class="qrow" data-act="openListQ" data-v="${esc(q.id)}">
         <div class="qh"><span class="badge pri">${esc(q.kp)}</span><span class="badge">${q.y}年 · ${esc(q.ty)}${esc(q.num)}</span>
         ${p[q.id] ? `<span class="qst ${p[q.id].r}">${RATE_TXT[p[q.id].r]}</span>` : ''}${(S.rec.fav || []).includes(q.id) ? '<span class="qstar">★</span>' : ''}</div>
-        <div class="qs">${esc(q.stem.length > 60 ? q.stem.slice(0, 60) + '…' : q.stem)}</div></button>`).join('')}
+        <div class="qs">${esc(q.stem.length > 60 ? q.stem.slice(0, 60) + '…' : q.stem)}</div></button>`;
+    const sect = shown.map(g => {
+      const folded = !!(S.listFold && S.listFold[g.chap]);
+      return `<div class="chapsec">
+        <div class="chaphead">
+          <button class="chapname" data-act="listChapFold" data-v="${esc(g.chap)}">${folded ? '▸' : '▾'} ${esc(g.name)}<span class="k"> ${g.items.length} 题</span></button>
+          <button class="chip" data-act="listChapStart" data-v="${esc(g.chap)}">刷本章</button>
+        </div>
+        ${folded ? '' : `<div class="card" style="padding:4px 16px">${g.items.map(qrow).join('')}</div>`}
       </div>`;
+    }).join('');
+    return `<div class="backrow"><button class="backbtn" data-act="home">‹ 首页</button>
+      <span class="bk-sub">${LIST_NAME[kind]} · ${list.length} 题</span></div>
+      <div class="muted" style="margin:6px 4px 2px">按章节查看，点“刷本章”只刷这一章（不计入主进度）</div>
+      ${chips}
+      <div style="margin-top:10px">${sect}</div>`;
   }
   /* ----- 薄弱考点 ----- */
   function kpStats() {
@@ -1360,7 +1383,7 @@
     render(); saveSess();
   }
   function finish() {
-    if (S.session) { S.rec.sessions.push({ ...S.session }); if (S.rec.sessions.length > 300) S.rec.sessions = S.rec.sessions.slice(-300); saveRec(); }
+    if (S.session && !S.ephemeral) { S.rec.sessions.push({ ...S.session }); if (S.rec.sessions.length > 300) S.rec.sessions = S.rec.sessions.slice(-300); saveRec(); }
     if (!S.ephemeral) clearSess(); else S.snap = loadJSON(LS.sess(S.user), null) || S.snap;
     S.view = 'summary'; render();
   }
@@ -1407,7 +1430,18 @@
           for (let j = from; j < S.queue.length; j++) { if (!p[S.queue[j].id]) { k = j; break; } }
           if (k < 0) for (let j = 0; j < from; j++) { if (!p[S.queue[j].id]) { k = j; break; } }
           if (k < 0) { toast('这一组都做过了'); return; } jumpTo(k); closeSheet(); return; }
-        case 'listOpen': S.listKind = v; S.view = 'lists'; S.tab = 'quiz'; render(); return;
+        case 'listOpen': S.listKind = v; S.listChap = ''; S.listFold = {}; S.view = 'lists'; S.tab = 'quiz'; render(); return;
+        case 'listChap': S.listChap = el.dataset.v || ''; render(); return;
+        case 'listChapFold': {
+          S.listFold = S.listFold || {}; const k = el.dataset.v;
+          S.listFold[k] = !S.listFold[k]; render(); return;
+        }
+        case 'listChapStart': {
+          const g = listQueue(S.listKind).filter(q => q.chap === el.dataset.v);
+          const nm = (g[0] && g[0].chname) || el.dataset.v;
+          startCustom(g, 0, LIST_NAME[S.listKind] + "：" + nm);
+          return;
+        }
         case 'openListQ': {
           const list = listQueue(S.listKind);
           const i = list.findIndex(q => q.id === v);

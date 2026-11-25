@@ -2,6 +2,8 @@
 (function () {
   const BANK = window.QBANK || [];
   const ALLQ = BANK.slice();          // 全量题库（去重后会从 BANK 中移除，但这里始终保留）
+  const BYID = {};
+  ALLQ.forEach(q => { BYID[q.id] = q; });
   let HIDDEN = new Set();             // 被去重隐藏的题号
   const CHS = window.CHAPTERS || [];
   const KPS = window.KPS || [];
@@ -113,20 +115,58 @@
   }
 
   /* ---------- 重复题去重（全库同题干只留一版） ---------- */
-  const dupNorm = t => String(t == null ? '' : t).replace(/[\s\u3000（）()【】\[\]，,。.、；;：:？?！!“”"'’‘\-—_/\\]/g, '').toLowerCase();
+  // 归一化：空号 (1)(28) 统一、分值不计、标点空白忽略
+  const dupNorm = t => String(t == null ? '' : t)
+    .replace(/[（(]\s*\d+\s*分\s*[)）]/g, '')
+    .replace(/[（(]\s*\d+\s*[)）]/g, '#')
+    .replace(/[\s\u3000（）()【】\[\]，,。.、；;：:？?！!“”"'’‘\-—_/\\]/g, '')
+    .toLowerCase();
   const normOf = q => (q.__dn === undefined ? (q.__dn = dupNorm(q.stem)) : q.__dn);   // 每题只算一次
   let DUP_CACHE = {};
+  let DUPG = null, DUPG_BY_ID = new Map();     // dupgroups.json：人工/离线核对过的同题分组
   function clearDupCache() { DUP_CACHE = {}; }
+  function applyDupGroups(o) {
+    if (!o || !o.groups) return false;
+    DUPG = o; DUPG_BY_ID = new Map();
+    o.groups.forEach(g => (g.ids || []).forEach(id => DUPG_BY_ID.set(id, g)));
+    return true;
+  }
+  function loadDupGroupsCache() { applyDupGroups(loadJSON('qb.dupg', null)); }
+  async function loadDupGroupsRemote() {
+    const o = await fetchFixFile('./dupgroups.json?t=' + now());
+    if (!o || !o.groups) return;
+    saveJSON('qb.dupg', o); applyDupGroups(o); clearDupCache();
+    // 新规则下不再属于「可隐藏」的旧隐藏项，自动放回题库
+    const allow = new Set();
+    o.groups.forEach(g => { if (!g.cross && !g.sus && g.cls !== 'noun') g.ids.forEach(id => allow.add(id)); });
+    const kept = [...HIDDEN].filter(id => allow.has(id));
+    if (kept.length !== HIDDEN.size) {
+      const n = HIDDEN.size - kept.length;
+      HIDDEN = new Set(kept); saveJSON('qb.dedup', { hidden: kept, updated: now() });
+      applyDedup(); if (S.view) render(); toast('按新判重规则放回 ' + n + ' 条误隐藏的题');
+    }
+  }
   function detectDups(includeNoun) {
-    const map = new Map();
-    ALLQ.forEach(q => {
-      if (!includeNoun && q.ty === '名词') return;
-      const k = normOf(q); if (!k || k.length < 6) return;
-      if (!map.has(k)) map.set(k, []);
-      map.get(k).push(q);
-    });
     const groups = [];
-    map.forEach((list, k) => { if (list.length > 1) groups.push({ key: k, items: list }); });
+    if (DUPG && DUPG.groups) {
+      DUPG.groups.forEach(g => {
+        const items = (g.ids || []).map(id => BYID[id]).filter(Boolean);
+        if (items.length < 2) return;
+        if (g.cross) return;                       // 跨题型（选择 vs 填空）不算重复
+        if (g.cls === 'noun' && !includeNoun) return;
+        if (g.sus) return;                         // 题干同但选项差异大：疑似题，不自动隐藏
+        groups.push({ key: g.k + '|' + g.ids[0], items, cls: g.cls });
+      });
+    } else {
+      const map = new Map();
+      ALLQ.forEach(q => {
+        if (!includeNoun && q.ty === '名词') return;
+        const k = normOf(q); if (!k || k.length < 6) return;
+        if (!map.has(k)) map.set(k, []);
+        map.get(k).push(q);
+      });
+      map.forEach((list, k) => { if (list.length > 1) groups.push({ key: k, items: list }); });
+    }
     groups.sort((a, b) => b.items.length - a.items.length);
     return groups;
   }
@@ -743,6 +783,7 @@
         <button class="star ${isFav ? 'on' : ''}" data-act="star">${isFav ? '★' : '☆'}</button>
       </div>
       <div class="stem">${esc(q.stem)}</div>
+      ${sibBlockHTML(q)}
       ${body}
       ${ansBlock}
       <div class="rate ${showAns ? 'show' : ''}">
@@ -1063,7 +1104,7 @@
       <div class="card" style="padding:10px 12px;margin-top:4px;background:${HIDDEN.size ? 'var(--pri-weak)' : '#f6f8fa'}">
         <b style="font-size:13px;color:${HIDDEN.size ? 'var(--pri)' : 'var(--tx2)'}">${HIDDEN.size ? '当前状态：已去重，隐藏了 ' + HIDDEN.size + ' 条，题库共 ' + BANK.length + ' 题' : '当前状态：未去重，题库共 ' + BANK.length + ' 题（全部重复题都在刷题里出现）'}</b>
       </div>
-      <div class="desc">同一道题在不同年份反复出现，这里每组只留一版（点亮的那条），其余在刷题、搜题里隐藏。背诵用的名词解释默认不参与。</div>
+      <div class="desc">同题干、同题型、选项一致才判为重复；跨题型和选项差异大的「疑似同题」不自动隐藏，名词解释默认不参与。每题卡里还会折叠显示历年同题，可逐个对照。</div>
       <div class="row" style="justify-content:space-between;margin-top:10px">
         <button class="chip ${S.dup.includeNoun ? 'on' : ''}" data-act="dupNoun">${S.dup.includeNoun ? '✓ ' : ''}名词解释也去重</button>
         <span class="k" id="dupCount">${shown.length} 组 · 将隐藏 ${extra} 条</span>
@@ -1166,11 +1207,71 @@
     } catch (e) { toast('删除失败：' + ((e && e.message) || '未知错误')); }
   }
 
-  /* 同题/近似同题：题干归一化后相同 */
+  /* 同题/近似同题：优先用离线核对过的分组，缺文件时退回题干归一化 */
   function dupSiblings(q) {
+    const g = DUPG_BY_ID.get(q.id);
+    if (g) return (g.ids || []).map(id => BYID[id]).filter(x => x && x.id !== q.id);
     const k = dupNorm(q.stem);
     if (!k || k.length < 6) return [];
     return ALLQ.filter(x => x.id !== q.id && dupNorm(x.stem) === k);
+  }
+  /* 题卡内折叠展示：历年同题 */
+  const ansOf = q => (q.ty === '判断' || q.opts && q.opts.length) ? (q.correct || '') : (q.ans || '');
+  const ansKey = q => {
+    if (q.ty === '判断') return 'J' + (q.correct || '');
+    if (q.opts && q.opts.length) return 'S' + (q.correct || '');
+    return 'T' + dupNorm(q.ans || '').slice(0, 160);
+  };
+  function optJac(a, b) {
+    const sa = new Set((a.opts || []).map(o => dupNorm(o))), sb = new Set((b.opts || []).map(o => dupNorm(o)));
+    if (!sa.size || !sb.size) return null;
+    let inter = 0; sa.forEach(x => { if (sb.has(x)) inter++; });
+    return inter / (sa.size + sb.size - inter);
+  }
+  function ansSegs(q) {
+    if (q.ty === '判断' || (q.opts && q.opts.length)) return null;
+    let t = q.ans || '';
+    t = t.replace(/[｜|]?\s*考点[：:].*$/, '');
+    return t.split(/[；;，,、\s]+/).map(x => dupNorm(x)).filter(x => x.length > 1);
+  }
+  function ansSim(a, b) {
+    const ka = ansKey(a), kb = ansKey(b);
+    if (ka.charAt(0) !== 'T' || kb.charAt(0) !== 'T') return ka === kb ? 1 : 0;
+    const sa = new Set(ansSegs(a) || []), sb = new Set(ansSegs(b) || []);
+    if (!sa.size || !sb.size) return 0;
+    let inter = 0; sa.forEach(x => { if (sb.has(x)) inter++; });
+    return inter / (sa.size + sb.size - inter);
+  }
+  function sibBlockHTML(q) {
+    const g = DUPG_BY_ID.get(q.id);
+    const others = g ? (g.ids || []).map(id => BYID[id]).filter(x => x && x.id !== q.id) : dupSiblings(q);
+    if (!others.length) return '';
+    const idsAll = g ? (g.ids || []) : [q.id].concat(others.map(x => x.id));
+    const years = idsAll.map(id => BYID[id] && BYID[id].y).filter(Boolean).sort();
+    const rows = others.slice().sort((a, b) => (a.y || '').localeCompare(b.y || '')).map(x => {
+      const tags = [];
+      if (x.id === q.id) tags.push('<span class="sibtag same">本题</span>');
+      if (HIDDEN.has(x.id)) tags.push('<span class="sibtag hid">已隐藏</span>');
+      const asm = ansSim(q, x);
+      tags.push(asm >= .8 ? '<span class="sibtag same">答案一致</span>' : asm >= .5 ? '<span class="sibtag">答案近似</span>' : '<span class="sibtag diff">答案有差异</span>');
+      const j = optJac(q, x);
+      if (j !== null && j < 0.5) tags.push('<span class="sibtag">选项不同</span>');
+      if (x.ty === '名词') tags.push('<span class="sibtag">名词同词条</span>');
+      let prev = '';
+      if (x.opts && x.opts.length) {
+        const k = x.correct || '';
+        const idx = 'ABCD'.indexOf(k);
+        prev = '答案 ' + (k || '—') + (idx >= 0 ? ' · ' + (x.opts[idx] || '') : '');
+      } else if (x.ty === '判断') prev = '答案 ' + (x.correct || '—');
+      else prev = (x.ans || '').replace(/\s+/g, ' ').slice(0, 54);
+      return `<button class="sibrow" data-act="sibOpen" data-id="${esc(x.id)}">
+        <span class="sy">${esc(x.y)}年 ${esc(x.ty)}${esc(x.num)}</span><span class="sibtags">${tags.join('')}</span>
+        <div class="sibans">${esc(prev)}${prev.length >= 54 ? '…' : ''}</div></button>`;
+    }).join('');
+    const hidN = others.filter(x => HIDDEN.has(x.id)).length;
+    return `<details class="sibbox"><summary><span class="sibt">历年同题 ${others.length + 1} 处</span><span class="sibsub">${years[0] ? years[0] + '–' + years[years.length - 1] + ' · ' : ''}点开看其他 ${others.length} 题${hidN ? '（其中 ' + hidN + ' 条已被去重隐藏）' : ''}</span></summary>
+      <div class="siblist">${rows}</div>
+      <div class="sibnote">同题干的历史版本，答案差异可直接对照；点任意一条跳到那道题（临时模式，不计入进度）。</div></details>`;
   }
 
   /* ---------- 纠错编辑器 ---------- */
@@ -1567,6 +1668,11 @@
         case 'reveal': { const q = S.queue[S.idx]; S.revealed[q.id + ':' + i] = 1; render(); return; }
         case 'revealAll': { const q = S.queue[S.idx]; (q.pts || []).forEach((_, k) => S.revealed[q.id + ':' + k] = 1); render(); return; }
         case 'rate': rate(el.dataset.r); return;
+        case 'sibOpen': {
+          const id = el.dataset.id; const q2 = BYID[id];
+          if (!q2) { toast('题目不存在'); return; }
+          startCustom([q2], 0, '同题 · ' + id); return;
+        }
         case 'star': {
           const q = S.queue[S.idx]; const fav = S.rec.fav;
           const k = fav.indexOf(q.id);
@@ -1661,10 +1767,11 @@
     if (cur.indexOf('\\"') >= 0) cur = cur.replace(/\\?"/g, '');
     applyFixesCache();                 // 修复：同步读缓存，先保证题库是校订后的
     applyNotesCache();                 // 笔记也先读缓存
+    loadDupGroupsCache();              // 判重分组：同步读缓存
     loadDedupCache();                  // 去重：同步读缓存，先按已去重的题库渲染
-    if (!cur) { render(); userSheet(); loadRemoteIndex(); loadFixesRemote(); loadNotesRemote(); loadDedupRemote(); return; }
+    if (!cur) { render(); userSheet(); loadRemoteIndex(); loadFixesRemote(); loadNotesRemote(); loadDupGroupsRemote(); loadDedupRemote(); return; }
     setUser(cur, true);                // 先用本地记录渲染，不等网络
-    loadRemoteIndex(); loadFixesRemote(); loadNotesRemote(); loadDedupRemote();
+    loadRemoteIndex(); loadFixesRemote(); loadNotesRemote(); loadDupGroupsRemote(); loadDedupRemote();
     if (S.token) pullFromRepo(cur, true); else setSync('off', '仅本地（未配置令牌）');
   }
   window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveSess(); });

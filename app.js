@@ -122,6 +122,7 @@
     .replace(/[\s\u3000（）()【】\[\]，,。.、；;：:？?！!“”"'’‘\-—_/\\]/g, '')
     .toLowerCase();
   const normOf = q => (q.__dn === undefined ? (q.__dn = dupNorm(q.stem)) : q.__dn);   // 每题只算一次
+  const qclass = q => (q.ty === '选择' || q.ty === '单选' || q.ty === '多选') ? 'sel' : q.ty === '填空' ? 'fill' : q.ty === '判断' ? 'judge' : q.ty === '名词' ? 'noun' : 'subj';
   let DUP_CACHE = {};
   let DUPG = null, DUPG_BY_ID = new Map();     // dupgroups.json：人工/离线核对过的同题分组
   function clearDupCache() { DUP_CACHE = {}; }
@@ -162,8 +163,9 @@
       ALLQ.forEach(q => {
         if (!includeNoun && q.ty === '名词') return;
         const k = normOf(q); if (!k || k.length < 6) return;
-        if (!map.has(k)) map.set(k, []);
-        map.get(k).push(q);
+        const kk = qclass(q) + '|' + k;            // 兜底也不跨题型合并
+        if (!map.has(kk)) map.set(kk, []);
+        map.get(kk).push(q);
       });
       map.forEach((list, k) => { if (list.length > 1) groups.push({ key: k, items: list }); });
     }

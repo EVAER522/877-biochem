@@ -132,19 +132,17 @@
     o.groups.forEach(g => (g.ids || []).forEach(id => DUPG_BY_ID.set(id, g)));
     return true;
   }
-  function loadDupGroupsCache() { applyDupGroups(loadJSON('qb.dupg', null)); }
-  async function loadDupGroupsRemote() {
-    const o = await fetchFixFile('./dupgroups.json?t=' + now());
-    if (!o || !o.groups) return;
-    saveJSON('qb.dupg', o); applyDupGroups(o); clearDupCache();
-    // 新规则下不再属于「可隐藏」的旧隐藏项，自动放回题库
+  function loadDupGroupsCache() {
+    applyDupGroups(window.DUPGROUPS || loadJSON('qb.dupg', null));   // 随 questions.js 同步加载，避免去重时还没拉到分组
+    if (window.DUPGROUPS) saveJSON('qb.dupg', window.DUPGROUPS);
+  }
+  function pruneHiddenByGroups() {
+    if (!DUPG || !DUPG.groups) return;
     const allow = new Set();
-    o.groups.forEach(g => { if (!g.cross && !g.sus) g.ids.forEach(id => allow.add(id)); });   // 名词若用户主动开启过，也保留
+    DUPG.groups.forEach(g => { if (!g.cross && !g.sus) g.ids.forEach(id => allow.add(id)); });
     const kept = [...HIDDEN].filter(id => allow.has(id));
     if (kept.length !== HIDDEN.size) {
-      const n = HIDDEN.size - kept.length;
-      HIDDEN = new Set(kept); saveJSON('qb.dedup', { hidden: kept, updated: now() });
-      applyDedup(); if (S.view) render(); toast('按新判重规则放回 ' + n + ' 条误隐藏的题');
+      HIDDEN = new Set(kept); saveJSON('qb.dedup', { hidden: kept, updated: now() }); applyDedup();
     }
   }
   function detectDups(includeNoun) {
@@ -1769,11 +1767,12 @@
     if (cur.indexOf('\\"') >= 0) cur = cur.replace(/\\?"/g, '');
     applyFixesCache();                 // 修复：同步读缓存，先保证题库是校订后的
     applyNotesCache();                 // 笔记也先读缓存
-    loadDupGroupsCache();              // 判重分组：同步读缓存
+    loadDupGroupsCache();              // 判重分组：随页面同步加载
     loadDedupCache();                  // 去重：同步读缓存，先按已去重的题库渲染
-    if (!cur) { render(); userSheet(); loadRemoteIndex(); loadFixesRemote(); loadNotesRemote(); loadDupGroupsRemote(); loadDedupRemote(); return; }
+    pruneHiddenByGroups();             // 新规则下不再成立的旧隐藏项放回
+    if (!cur) { render(); userSheet(); loadRemoteIndex(); loadFixesRemote(); loadNotesRemote(); loadDedupRemote(); return; }
     setUser(cur, true);                // 先用本地记录渲染，不等网络
-    loadRemoteIndex(); loadFixesRemote(); loadNotesRemote(); loadDupGroupsRemote(); loadDedupRemote();
+    loadRemoteIndex(); loadFixesRemote(); loadNotesRemote(); loadDedupRemote();
     if (S.token) pullFromRepo(cur, true); else setSync('off', '仅本地（未配置令牌）');
   }
   window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveSess(); });

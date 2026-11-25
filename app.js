@@ -139,7 +139,7 @@
     saveJSON('qb.dupg', o); applyDupGroups(o); clearDupCache();
     // 新规则下不再属于「可隐藏」的旧隐藏项，自动放回题库
     const allow = new Set();
-    o.groups.forEach(g => { if (!g.cross && !g.sus && g.cls !== 'noun') g.ids.forEach(id => allow.add(id)); });
+    o.groups.forEach(g => { if (!g.cross && !g.sus) g.ids.forEach(id => allow.add(id)); });   // 名词若用户主动开启过，也保留
     const kept = [...HIDDEN].filter(id => allow.has(id));
     if (kept.length !== HIDDEN.size) {
       const n = HIDDEN.size - kept.length;

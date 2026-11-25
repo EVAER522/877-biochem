@@ -539,6 +539,16 @@
 
   /* ----- 搜题 ----- */
   const normTxt = t => String(t == null ? '' : t).toLowerCase().replace(/[\s\u3000]+/g, '');
+  /* 答案里带序号的分点，显示时自动换行（题库文本是单行存储的） */
+  function fmtAnsText(t) {
+    let x = String(t == null ? '' : t).replace(/\r/g, '');
+    if (x.indexOf('\n') >= 0) return x;
+    const re = /(\(\d{1,2}\)|（\d{1,2}）|[①②③④⑤⑥⑦⑧⑨⑩]|\([a-d]\)|（[a-d]）)/g;
+    const hits = x.match(re) || [];
+    if (hits.length < 2) return x;
+    return x.replace(re, (m, _g, off) => (off > 0 ? '\n' + m : m));
+  }
+
   function haystack(q) {
     return normTxt([q.stem, (q.opts || []).join(' '), q.ans, q.kp, q.kpnote, q.y + '年', q.id, q.chname].join(' '));
   }
@@ -715,7 +725,7 @@
       ansBlock = `<div class="answer show"><div class="ans-label">答案 · ${q.pts && q.pts.length ? '分' + q.pts.length + '块遮盖，点一下显示一块' : '完整答案'}</div>
         ${pts.map((t, i) => {
         const masked = q.pts && q.pts.length && !S.revealed[q.id + ':' + i];
-        return `<div class="pt ${masked ? 'masked' : ''}" data-act="${masked ? 'reveal' : ''}" data-i="${i}" style="--c:${COLORS[i % COLORS.length]}" data-label="要点 ${i + 1} · 轻点显示"><span class="txt">${esc(t)}</span></div>`;
+        return `<div class="pt ${masked ? 'masked' : ''}" data-act="${masked ? 'reveal' : ''}" data-i="${i}" style="--c:${COLORS[i % COLORS.length]}" data-label="要点 ${i + 1} · 轻点显示"><span class="txt">${esc(fmtAnsText(t))}</span></div>`;
       }).join('')}
         ${q.pts && q.pts.length > 1 ? `<div class="reveal-all" data-act="revealAll">显示全部要点</div>` : ''}
         ${q.kpnote ? `<div class="kpnote">考点：${esc(q.kpnote.replace(/^：/, ''))}</div>` : ''}

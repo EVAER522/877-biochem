@@ -192,14 +192,23 @@
   }
   async function loadDedupRemote() {
     const [a, b] = await Promise.all([fetchFixFile('./dedup.json?t=' + now()), fetchFixFile(api.raw('dedup.json') + '?t=' + now())]);
+    const objs = [a, b].filter(Boolean);
+    const local = loadJSON('qb.dedup', {}) || {};
+    // 别的设备点过「关闭去重」：远端 off 且比本地新，就以远端为准清空
+    let off = null;
+    objs.forEach(o => { if (o.off && (!off || (o.updated || 0) > (off.updated || 0))) off = o; });
+    if (off && (off.updated || 0) > (local.updated || 0)) {
+      HIDDEN = new Set(); saveJSON('qb.dedup', { hidden: [], updated: off.updated, off: true });
+      applyDedup(); if (S.view) render(); return;
+    }
     const list = (a && a.hidden) || (b && b.hidden) || [];
     if (!list.length) return;
     let changed = false;
     list.forEach(id => { if (!HIDDEN.has(id)) { HIDDEN.add(id); changed = true; } });
-    if (changed) { saveJSON('qb.dedup', { hidden: [...HIDDEN] }); applyDedup(); if (S.view) render(); }
+    if (changed) { saveJSON('qb.dedup', { hidden: [...HIDDEN], updated: now() }); applyDedup(); if (S.view) render(); }
   }
   function saveDedup(reset) {
-    const payload = { hidden: [...HIDDEN], updated: now() };
+    const payload = { hidden: [...HIDDEN], updated: now(), off: !!reset };
     saveJSON('qb.dedup', payload);           // 本地即时生效
     applyDedup();
     if (S.token) syncDedup(payload, reset);  // 网络写回放后台，不挡界面

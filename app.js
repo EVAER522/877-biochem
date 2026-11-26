@@ -520,7 +520,10 @@
     <div class="hero">
       <div class="hero-row">
         <div><div class="hero-t">生物化学 · 刷题台</div><div class="hero-s">${BANK.length - known} 题未掌握 · 今日已练 ${todayN} 题</div></div>
-        <div class="hero-ring" style="--p:${pct}"><b>${pct}%</b><span>已练</span></div>
+        <div class="hero-right">
+          <button class="refb" data-act="refresh" aria-label="刷新所有状态"><i>↻</i><span>刷新</span></button>
+          <div class="hero-ring" style="--p:${pct}"><b>${pct}%</b><span>已练</span></div>
+        </div>
       </div>
       <div class="hstats">
         <button class="hstat" data-act="listOpen" data-v="done"><b>${doneN}</b><span>已练</span></button>
@@ -1476,6 +1479,26 @@
     restorePlace(p);
   }
 
+  /* ---------- 刷新所有状态 ---------- */
+  async function refreshAll() {
+    if (S._refreshing) return;
+    S._refreshing = true;
+    setSync('sync', '正在刷新…'); toast('正在刷新所有状态…');
+    try { saveRec(); saveSess(); } catch (e) { }
+    try { if (S.token && S.user) await pushToRepo(); } catch (e) { }
+    try {
+      await Promise.allSettled([loadRemoteIndex(), loadFixesRemote(), loadNotesRemote(), loadDedupRemote()]);
+      if (S.token && S.user) await pullFromRepo(S.user, true);
+      S._memo = null; clearDupCache();
+      if (typeof rebuildHay === 'function') rebuildHay();
+      S._refreshing = false;
+      render(); toast('已刷新');
+    } catch (e) {
+      S._refreshing = false;
+      toast('刷新失败：' + ((e && e.message) || '未知错误'));
+    }
+  }
+
   /* ---------- flow ---------- */
   function startSession() {
     S.queue = buildQueue();
@@ -1569,6 +1592,7 @@
         case 'start': startSession(); return;
         case 'clearSearch': S.sw = ''; render(); return;
         case 'back': goBack(); return;
+        case 'refresh': if (el) el.classList.add('busy'); refreshAll(); return;
         case 'home': NAV = []; S.view = 'setup'; S.tab = 'quiz'; render(); return;
         case 'searchSheet': searchSheet(); return;
         case 'memo': pushPlace(currentPlace()); S.view = 'memo'; S.tab = 'quiz'; render(); return;

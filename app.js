@@ -674,7 +674,7 @@
         ${folded ? '' : `<div class="card" style="padding:4px 16px">${g.items.map(qrow).join('')}</div>`}
       </div>`;
     }).join('');
-    return `<div class="backrow"><button class="backbtn" data-act="home">‹ 首页</button>
+    return `<div class="backrow"><button class="backbtn" data-act="back">${backLabel()}</button>
       <span class="bk-sub">${LIST_NAME[kind]} · ${list.length} 题</span></div>
       <div class="muted" style="margin:6px 4px 2px">按章节查看，点“刷本章”只刷这一章（不计入主进度）</div>
       ${chips}
@@ -783,7 +783,7 @@
     const rated = S.rated;
     return `
     <div class="progress"><i id="qbar"></i></div>
-    <div class="backrow"><button class="backbtn" data-act="home">‹ 首页</button>
+    <div class="backrow"><button class="backbtn" data-act="back">${backLabel()}</button>
       <span class="bk-sub">${esc(q.chname)}${st ? ' · 上次：' + RATE_TXT[st.r] : ''}${S.ephemeral ? ' · 临时' : ''}</span>
       <button class="backbtn" style="margin-left:auto;white-space:nowrap" data-act="cardSheet">答题卡 ${S.idx + 1}/${S.queue.length}</button></div>
     <div class="card">
@@ -1021,7 +1021,7 @@
   }
   function memHTML() {
     const gs = memoGroups(); const ms = memStat();
-    return `<div class="backrow"><button class="backbtn" data-act="home">‹ 首页</button>
+    return `<div class="backrow"><button class="backbtn" data-act="back">${backLabel()}</button>
       <span class="bk-sub">点开看答案 · 可标熟练度</span>
       <button class="backbtn" style="margin-left:auto;white-space:nowrap" data-act="memoToggleAll">${Object.keys(S.mo).length ? '全部收起' : '全部展开'}</button></div>
       <div class="card">
@@ -1438,17 +1438,57 @@
       <input type="file" id="impFile" accept="application/json,.json" style="width:100%;padding:10px;border:1px dashed var(--line);border-radius:10px;background:#fafbfc"/>`);
   }
 
+  /* ---------- 返回上一级（导航栈） ---------- */
+  let NAV = [];                       // 记录进入下一级前的界面
+  function pushPlace(p) {
+    if (!p) return;
+    const sig = o => JSON.stringify({ t: o.type, k: o.listKind, c: o.listChap, i: o.idx, q: o.custom });
+    if (NAV.length && sig(NAV[NAV.length - 1]) === sig(p)) return;
+    NAV.push(p);
+    if (NAV.length > 20) NAV.shift();
+  }
+  function currentPlace() {
+    if (S.view === 'lists') return { type: 'lists', listKind: S.listKind, listChap: S.listChap, fold: Object.assign({}, S.listFold) };
+    if (S.view === 'memo') return { type: 'memo' };
+    if (S.view === 'quiz') return { type: 'quiz', queue: S.queue, idx: S.idx, custom: S.custom, ephemeral: S.ephemeral, session: S.session };
+    if (S.tab === 'weak') return { type: 'weak' };
+    if (S.view === 'summary') return { type: 'summary' };
+    return { type: 'setup' };
+  }
+  function backLabel() { return NAV.length ? '‹ 返回' : '‹ 首页'; }
+  function restorePlace(p) {
+    if (!p || p.type === 'setup') { S.view = 'setup'; S.tab = 'quiz'; render(); return; }
+    if (p.type === 'lists') { S.listKind = p.listKind || 'fav'; S.listChap = p.listChap || ''; S.listFold = p.fold || {}; S.view = 'lists'; S.tab = 'quiz'; render(); return; }
+    if (p.type === 'memo') { S.view = 'memo'; S.tab = 'quiz'; render(); return; }
+    if (p.type === 'weak') { S.tab = 'weak'; S.view = 'setup'; render(); return; }
+    if (p.type === 'search') { S.sw = p.sw || ''; S.view = 'setup'; S.tab = 'quiz'; render(); searchSheet(); return; }
+    if (p.type === 'quiz') {
+      S.queue = p.queue || []; S.idx = Math.max(0, Math.min(p.idx || 0, Math.max(0, S.queue.length - 1)));
+      S.custom = p.custom || ''; S.ephemeral = p.ephemeral !== false;
+      S.session = p.session || S.session;
+      S.phase = 'ask'; S.revealed = {}; S.picked = null; S.rated = null; S.correctFlag = null;
+      S.view = 'quiz'; S.tab = 'quiz'; render(); return;
+    }
+    S.view = 'setup'; S.tab = 'quiz'; render();
+  }
+  function goBack() {
+    const p = NAV.pop();
+    restorePlace(p);
+  }
+
   /* ---------- flow ---------- */
   function startSession() {
     S.queue = buildQueue();
     if (!S.queue.length) { toast('这个范围没有题目'); return; }
     S.ephemeral = false;
+    pushPlace(currentPlace());
     launch(0);
   }
-  function startCustom(list, idx, label, keepProgress) {
+  function startCustom(list, idx, label, keepProgress, fromPlace) {
     if (!list.length) { toast('没有题目'); return; }
     S.queue = list;
     S.ephemeral = keepProgress !== false;
+    pushPlace(fromPlace || currentPlace());
     launch(Math.max(0, Math.min(idx || 0, list.length - 1)), label);
   }
   function launch(idx, label) {
@@ -1472,6 +1512,7 @@
     if (!list.length) { clearSess(); toast('上次的题目已失效'); render(); return; }
     S.filter = Object.assign({ tp: '', chap: '', kp: '', scope: 'all', order: 'seq' }, s.filter || {});
     S.queue = list;
+    pushPlace(currentPlace());
     S.custom = ''; S.ephemeral = false;
     S.idx = Math.min(s.idx || 0, list.length - 1);
     S.phase = 'ask'; S.revealed = {}; S.picked = null; S.rated = null; S.correctFlag = null;
@@ -1527,9 +1568,10 @@
         case 'order': S.filter.order = v; render(); return;
         case 'start': startSession(); return;
         case 'clearSearch': S.sw = ''; render(); return;
-        case 'home': S.view = 'setup'; S.tab = 'quiz'; render(); return;
+        case 'back': goBack(); return;
+        case 'home': NAV = []; S.view = 'setup'; S.tab = 'quiz'; render(); return;
         case 'searchSheet': searchSheet(); return;
-        case 'memo': S.view = 'memo'; S.tab = 'quiz'; render(); return;
+        case 'memo': pushPlace(currentPlace()); S.view = 'memo'; S.tab = 'quiz'; render(); return;
         case 'memoOpen': { const g = memoGroups()[v]; if (!g) return; S.mo[g.key] = !S.mo[g.key]; render(); return; }
         case 'memFilter': S.mf = v; render(); return;
         case 'memSort': S.msort = v; render(); return;
@@ -1550,7 +1592,7 @@
           for (let j = from; j < S.queue.length; j++) { if (!p[S.queue[j].id]) { k = j; break; } }
           if (k < 0) for (let j = 0; j < from; j++) { if (!p[S.queue[j].id]) { k = j; break; } }
           if (k < 0) { toast('这一组都做过了'); return; } jumpTo(k); closeSheet(); return; }
-        case 'listOpen': S.listKind = v; S.listChap = ''; S.listFold = {}; S.view = 'lists'; S.tab = 'quiz'; render(); return;
+        case 'listOpen': pushPlace(currentPlace()); S.listKind = v; S.listChap = ''; S.listFold = {}; S.view = 'lists'; S.tab = 'quiz'; render(); return;
         case 'listChap': S.listChap = el.dataset.v || ''; render(); return;
         case 'listChapFold': {
           S.listFold = S.listFold || {}; const k = el.dataset.v;
@@ -1569,13 +1611,13 @@
         }
         case 'brushRes': {
           const rs = searchResults();
-          startCustom(rs, 0, '搜索：' + S.sw.trim() + '（' + rs.length + '题）'); return;
+          startCustom(rs, 0, '搜索：' + S.sw.trim() + '（' + rs.length + '题）', undefined, { type: 'search', sw: S.sw }); return;
         }
         case 'openq': {
-          closeSheet();
+          const swq = S.sw; closeSheet();
           const rs = searchResults();
           const i = rs.findIndex(q => q.id === v);
-          startCustom(rs, i < 0 ? 0 : i, '搜索：' + S.sw.trim() + '（' + rs.length + '题）'); return;
+          startCustom(rs, i < 0 ? 0 : i, '搜索：' + swq.trim() + '（' + rs.length + '题）', undefined, { type: 'search', sw: swq }); return;
         }
         case 'weakKp': {
           const [ch, kp] = String(v || '').split('|');
@@ -1680,7 +1722,7 @@
         case 'sibOpen': {
           const id = el.dataset.id; const q2 = BYID[id];
           if (!q2) { toast('题目不存在'); return; }
-          startCustom([q2], 0, '同题 · ' + id); return;
+          startCustom([q2], 0, '同题 · ' + id, undefined, currentPlace()); return;
         }
         case 'star': {
           const q = S.queue[S.idx]; const fav = S.rec.fav;
@@ -1692,7 +1734,7 @@
         case 'next': case 'skip': next(); return;
         case 'prev': if (S.idx > 0) { S.idx--; S.phase = 'ask'; S.revealed = {}; S.picked = null; S.rated = null; render(); } return;
         case 'again': S.view = 'quiz'; S.queue = buildQueue(); S.idx = 0; S.session = { t: now(), scope: scopeLabel().ch + ' · ' + scopeLabel().kp + ' · ' + scopeLabel().sc, n: 0, forgot: 0, vague: 0, known: 0, correct: 0, wrong: 0 }; S.phase = 'ask'; render(); return;
-        case 'toSetup': S.view = 'setup'; S.tab = 'quiz'; render(); return;
+        case 'toSetup': NAV = []; S.view = 'setup'; S.tab = 'quiz'; render(); return;
         case 'syncNow': if (!S.token) { tokenSheet(); return; } toast('同步中…'); await pushToRepo(); statusSheet(); render(); return;
         case 'switchUser': userSheet(); return;
         case 'pickUser': setUser(v); closeSheet(); return;

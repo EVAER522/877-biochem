@@ -160,7 +160,7 @@ main{padding:12px 14px 8px}
 
 /* 返回与题单 */
 .backrow{display:flex;align-items:center;gap:10px;margin:0 2px 8px}
-.backbtn{font-size:13px;color:var(--tx2);background:#fff;border:1px solid var(--line);border-radius:9px;padding:6px 10px}
+.backbtn{font-size:13px;color:var(--tx2);background:#fff;border:1px solid var(--line);border-radius:9px;padding:6px 10px;white-space:nowrap;flex:none}
 .bk-sub{font-size:11px;color:var(--tx3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .qrow{display:block;width:100%;text-align:left;padding:12px 0;border-bottom:1px solid var(--line)}
 .qrow:last-child{border-bottom:0}

@@ -4,6 +4,7 @@
   const ALLQ = BANK.slice();          // 全量题库（去重后会从 BANK 中移除，但这里始终保留）
   const BYID = {};
   ALLQ.forEach(q => { BYID[q.id] = q; });
+  const qById = id => BYID[id] || BANK.find(x => x.id === id) || null;   // 含被去重隐藏的题
   let HIDDEN = new Set();             // 被去重隐藏的题号
   const CHS = window.CHAPTERS || [];
   const KPS = window.KPS || [];
@@ -1430,7 +1431,7 @@
     openSheet(fixHTML());
   }
   function fixHTML() {
-    const q = BANK.find(x => x.id === S.fix.id) || {};
+    const q = qById(S.fix.id) || {};
     const subj = SUBJ_TY(q.ty);
     if (S.fix.stage === 'confirm') return fixConfirmHTML(q);
     let pick = '';
@@ -1529,7 +1530,7 @@
       <button class="btn ghost block" style="margin-top:8px" data-act="fixBack">返回修改</button>`;
   }
   async function saveFix() {
-    const q = BANK.find(x => x.id === S.fix.id); if (!q) return;
+    const q = qById(S.fix.id); if (!q) return;
     normalizeFix(q);   // 再兜一次，保证“正文/遮挡块/正确项”一致
     if (!S.token) { toast('未配置令牌，无法写回题库'); tokenSheet(); return; }
     const entry = { a: S.fix.ans, u: S.user || '', ts: now() };
@@ -1551,7 +1552,7 @@
       };
       await api.write('fixes.json', JSON.stringify(obj, null, 1), 'fix: 纠错 ' + q.id + (batch.length ? ' + ' + batch.length + ' 同题' : '') + (S.user ? ' by ' + S.user : ''), cur && cur.sha, { onConflict });
       FIXES = obj; saveJSON('qb.fixes', FIXES);
-      applyFix(q); batch.forEach(id => { const x = BANK.find(y => y.id === id); if (x) applyFix(x); });
+      applyFix(q); batch.forEach(id => { const x = BYID[id]; if (x) applyFix(x); });
       if (typeof rebuildHay === 'function') rebuildHay();
       closeSheet(); S.fix = null; S.revealed = {}; render(); toast(batch.length ? '已提交，含 ' + batch.length + ' 道同题' : '已提交，题库已更新');
     } catch (e) {
@@ -1852,7 +1853,7 @@
         case 'fixCancel': closeSheet(); S.fix = null; return;
         case 'fixSubmit': {
           collectFix();
-          const q = BANK.find(x => x.id === S.fix.id);
+          const q = qById(S.fix.id);
           if (!q || !diffFix(q).length) { toast('内容没有变化'); return; }
           S.fix.stage = 'confirm'; openSheet(fixHTML()); return;
         }

@@ -25,6 +25,9 @@
     auto: true, snap: null, sw: '', custom: '', listKind: 'fav', syncAt: 0, syncErr: '', sync: { state: 'idle', msg: '' }, _syncTimer: null, _syncing: false
   };
 
+  let LAST_PULL = 0;                   // 前台自动拉取的节流时间
+  let LAST_SHARED = 0;                 // 共享层（纠错/笔记/去重）的节流时间
+
   /* ---------- utils ---------- */
   const $ = id => document.getElementById(id);
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -46,14 +49,20 @@
       const j = await r.json();
       return { text: b64d(j.content || ''), sha: j.sha };
     },
-    async write(path, text, msg, sha, retry) {
+    async write(path, text, msg, sha, opt, attempt) {
       if (!S.token) throw Object.assign(new Error('NO_TOKEN'), { code: 'no_token' });
+      opt = opt || {}; attempt = attempt || 0;
       const body = { message: msg, content: b64e(text), branch: S.branch };
       if (sha) body.sha = sha;
       const r = await fetch(api.base() + encodeURI(path), { method: 'PUT', headers: { ...api.headers(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (r.status === 409 && !retry) {
-        const cur = await api.read(path);
-        return api.write(path, text, msg, cur && cur.sha, true);
+      if (r.status === 409 && attempt < 3) {
+        // 冲突不能拿旧快照硬写：先读最新版本，交给调用方真正合并后再提交
+        const cur = await api.read(path).catch(() => null);
+        let nextText = text;
+        if (cur && typeof opt.onConflict === 'function') {
+          try { nextText = opt.onConflict(cur.text); } catch (e) { nextText = text; }
+        }
+        return api.write(path, nextText, msg, cur && cur.sha, opt, attempt + 1);
       }
       if (!r.ok) { let t = ''; try { t = (await r.json()).message || ''; } catch (e) { } throw Object.assign(new Error(t || ('HTTP ' + r.status)), { status: r.status }); }
       return r.json();
@@ -103,14 +112,16 @@
       return (j && typeof j === 'object') ? j : null;
     } catch (e) { return null; }
   }
-  async function loadFixesRemote() {
-    const [viaPages, viaRaw] = await Promise.all([
+  async function loadFixesRemote(quiet) {
+    const viaApi = S.token ? api.read('fixes.json').then(f => f ? JSON.parse(f.text) : null).catch(() => null) : Promise.resolve(null);
+    const [viaPages, viaRaw, viaDirect] = await Promise.all([
       fetchFixFile('./fixes.json?t=' + now()),
-      fetchFixFile(api.raw('fixes.json') + '?t=' + now())
+      fetchFixFile(api.raw('fixes.json') + '?t=' + now()),
+      viaApi
     ]);
-    const merged = mergeFixObjects(mergeFixObjects(FIXES, viaPages || {}), viaRaw || {});
+    const merged = mergeFixObjects(mergeFixObjects(mergeFixObjects(FIXES, viaPages || {}), viaRaw || {}), viaDirect || {});
     if (JSON.stringify(merged) !== JSON.stringify(FIXES)) {
-      FIXES = merged; saveJSON('qb.fixes', FIXES); applyFixes(); if (S.view) render();
+      FIXES = merged; saveJSON('qb.fixes', FIXES); applyFixes(); if (!quiet && S.view) render();
     }
   }
 
@@ -190,22 +201,26 @@
     HIDDEN = new Set(d.hidden || []);
     applyDedup();
   }
-  async function loadDedupRemote() {
-    const [a, b] = await Promise.all([fetchFixFile('./dedup.json?t=' + now()), fetchFixFile(api.raw('dedup.json') + '?t=' + now())]);
-    const objs = [a, b].filter(Boolean);
+  async function loadDedupRemote(quiet) {
+    const viaApi = S.token ? api.read('dedup.json').then(f => f ? JSON.parse(f.text) : null).catch(() => null) : Promise.resolve(null);
+    const [a, b, c] = await Promise.all([fetchFixFile('./dedup.json?t=' + now()), fetchFixFile(api.raw('dedup.json') + '?t=' + now()), viaApi]);
+    const objs = [a, b, c].filter(Boolean);
     const local = loadJSON('qb.dedup', {}) || {};
     // 别的设备点过「关闭去重」：远端 off 且比本地新，就以远端为准清空
     let off = null;
     objs.forEach(o => { if (o.off && (!off || (o.updated || 0) > (off.updated || 0))) off = o; });
     if (off && (off.updated || 0) > (local.updated || 0)) {
       HIDDEN = new Set(); saveJSON('qb.dedup', { hidden: [], updated: off.updated, off: true });
-      applyDedup(); if (S.view) render(); return;
+      applyDedup(); if (!quiet && S.view) render(); return;
     }
-    const list = (a && a.hidden) || (b && b.hidden) || [];
+    const latestUp = objs.reduce((n, o) => Math.max(n, o.updated || 0), 0);
+    // 本机较新地“关闭去重”时，不能被别的设备旧 hidden 列表又打开
+    if (local.off && (local.updated || 0) >= latestUp) return;
+    const list = objs.reduce((arr, o) => arr.concat(o.hidden || []), []);
     if (!list.length) return;
     let changed = false;
     list.forEach(id => { if (!HIDDEN.has(id)) { HIDDEN.add(id); changed = true; } });
-    if (changed) { saveJSON('qb.dedup', { hidden: [...HIDDEN], updated: now() }); applyDedup(); if (S.view) render(); }
+    if (changed) { saveJSON('qb.dedup', { hidden: [...HIDDEN], updated: now() }); applyDedup(); if (!quiet && S.view) render(); }
   }
   function saveDedup(reset) {
     const payload = { hidden: [...HIDDEN], updated: now(), off: !!reset };
@@ -220,39 +235,50 @@
       if (cur && cur.text) { try { remote = JSON.parse(cur.text) || {}; } catch (e) { remote = {}; } }
       const merged = reset ? payload.hidden : [...new Set([...(remote.hidden || []), ...payload.hidden])];
       payload.hidden = merged;
-      await api.write('dedup.json', JSON.stringify(payload, null, 1), 'dedup: 隐藏重复题 ' + merged.length + ' 条', cur && cur.sha);
+      const onConflict = latest => {
+        let r = {}; try { r = JSON.parse(latest) || {}; } catch (e) { }
+        const h = reset ? payload.hidden : [...new Set([...(r.hidden || []), ...payload.hidden])];
+        payload.hidden = h;
+        return JSON.stringify(payload, null, 1);
+      };
+      await api.write('dedup.json', JSON.stringify(payload, null, 1), 'dedup: 隐藏重复题 ' + merged.length + ' 条', cur && cur.sha, { onConflict });
       // 只做并集，不反向改本地：避免把本机刚关掉的状态拉回来
     } catch (e) { toast('同步失败：' + ((e && e.message) || '未知错误')); }
   }
 
   /* ---------- 共享笔记（跨用户可见，随日志同步） ---------- */
   let NOTES = {};
-  function noteKey(n) { return (n.u || '') + '|' + (n.ts || 0); }
+  function noteKey(n) { return (n.u || ''); }                 // 每人每题只保留最新一条
   function mergeNotes(a, b) {
     const out = {};
-    ['a', 'b'].forEach(() => {});
     const ids = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
     ids.forEach(id => {
+      if (id === '__del') return;
       const map = new Map();
-      ((a || {})[id] || []).forEach(n => map.set(noteKey(n), n));
-      ((b || {})[id] || []).forEach(n => {
+      const add = n => {
+        if (!n) return;
         const k = noteKey(n); const cur = map.get(k);
-        if (!cur || (n.ts || 0) > (cur.ts || 0)) map.set(k, n);
-      });
+        if (!cur || (n.ts || 0) > (cur.ts || 0) || ((n.ts || 0) === (cur.ts || 0) && n.del && !cur.del)) map.set(k, n);
+      };
+      ((a || {})[id] || []).forEach(add);
+      ((b || {})[id] || []).forEach(add);
       const list = Array.from(map.values()).sort((x, y) => (x.ts || 0) - (y.ts || 0));
       if (list.length) out[id] = list;
     });
     return out;
   }
+  function visibleNotes(id) { return (NOTES[id] || []).filter(n => !n.del); }
   function applyNotesCache() { NOTES = loadJSON('qb.notes', null) || {}; }
-  async function loadNotesRemote() {
-    const [viaPages, viaRaw] = await Promise.all([
+  async function loadNotesRemote(quiet) {
+    const viaApi = S.token ? api.read('notes.json').then(f => f ? JSON.parse(f.text) : null).catch(() => null) : Promise.resolve(null);
+    const [viaPages, viaRaw, viaDirect] = await Promise.all([
       fetchFixFile('./notes.json?t=' + now()),
-      fetchFixFile(api.raw('notes.json') + '?t=' + now())
+      fetchFixFile(api.raw('notes.json') + '?t=' + now()),
+      viaApi
     ]);
-    const merged = mergeNotes(mergeNotes(NOTES, viaPages || {}), viaRaw || {});
+    const merged = mergeNotes(mergeNotes(mergeNotes(NOTES, viaPages || {}), viaRaw || {}), viaDirect || {});
     if (JSON.stringify(merged) !== JSON.stringify(NOTES)) {
-      NOTES = merged; saveJSON('qb.notes', NOTES); if (S.view) render();
+      NOTES = merged; saveJSON('qb.notes', NOTES); if (!quiet && S.view) render();
     }
   }
 
@@ -291,22 +317,41 @@
     }
     S.mem = S.rec.mem;
   }
+  function adoptRec(rec, u) {
+    if (u && u !== S.user) return false;          // 用户已切走：不要把上一个用户的记录塞给新用户
+    S.rec = rec;
+    S.mem = S.rec.mem || (S.rec.mem = {});
+    S._memo = null;                       // 进度/背名词变了，派生缓存作废
+    saveJSON(LS.rec(S.user), S.rec);
+    return true;
+  }
+  function afterRemoteRec() {
+    S.mem = S.rec.mem || (S.rec.mem = {});
+    if (S.view !== 'quiz') loadSess(S.user);          // 别的设备的断点也能出现在“继续上次”
+    const sh = $('sheet');
+    if (S.view && S.view !== 'quiz' && !(sh && sh.classList.contains('show'))) render();
+  }
   function saveMem() { if (S.user) saveRec(); }
+  function pendKey(u) { return 'qb.pend.' + (u || ''); }
   function saveRec() {
     S.rec.updated = now();
     saveJSON(LS.rec(S.user), S.rec);
+    S._dirty = true;
+    S._rev = (S._rev || 0) + 1;
+    if (S.user) saveJSON(pendKey(S.user), 1);
     scheduleSync();
   }
   function saveSess() {
     if (!S.user || S.ephemeral || S.view !== 'quiz' || !S.queue || !S.queue.length) return;
     const payload = { t: now(), filter: { ...S.filter }, idx: S.idx, ids: S.queue.map(q => q.id) };
     saveJSON(LS.sess(S.user), payload);
-    S.rec.brk = payload; saveRec();            // 断点跟着记录同步，换设备可续刷
+    S.rec.brk = payload; S.snap = payload; saveRec();   // 断点跟着记录同步，换设备可续刷
   }
   function clearSess() {
     if (S.user) localStorage.removeItem(LS.sess(S.user));
     S.snap = null;
-    if (S.rec) { S.rec.brk = null; saveRec(); }
+    // 断点也要有“删除”语义：空值会把别的设备的旧断点又合并回来
+    if (S.rec) { S.rec.brk = { t: now(), cleared: true }; saveRec(); }
   }
   function loadSess(u) {
     const local = loadJSON(LS.sess(u), null);
@@ -314,7 +359,7 @@
     S.snap = !local ? remote : !remote ? local : ((local.t || 0) >= (remote.t || 0) ? local : remote);
   }
   function snapInfo() {
-    const s = S.snap; if (!s || !s.ids || !s.ids.length) return null;
+    const s = S.snap; if (!s || s.cleared || !s.ids || !s.ids.length) return null;
     if (s.idx >= s.ids.length) return null;
     return s;
   }
@@ -323,6 +368,7 @@
     out.sessions = (local.sessions || []).slice();
     (remote.sessions || []).forEach(rs => { if (!out.sessions.some(x => x.t === rs.t)) out.sessions.push(rs); });
     out.sessions.sort((a, b) => a.t - b.t);
+    if (out.sessions.length > 300) out.sessions = out.sessions.slice(-300);
     out.favTs = { ...(remote.favTs || {}) }; Object.entries(local.favTs || {}).forEach(([k, v]) => { if ((v || 0) > (out.favTs[k] || 0)) out.favTs[k] = v; });
     out.favDel = { ...(remote.favDel || {}) }; Object.entries(local.favDel || {}).forEach(([k, v]) => { if ((v || 0) > (out.favDel[k] || 0)) out.favDel[k] = v; });
     out.fav = Array.from(new Set([...(local.fav || []), ...(remote.fav || [])]))
@@ -330,7 +376,8 @@
     out.progress = { ...(remote.progress || {}) };
     Object.entries(local.progress || {}).forEach(([k, v]) => {
       const r = out.progress[k];
-      if (!r || (v.n || 0) >= (r.n || 0) || (v.ts || 0) > (r.ts || 0)) out.progress[k] = v;
+      // 一律以最后评定的时间戳为准；n 只用于同一毫秒下的兜底
+      if (!r || (v.ts || 0) > (r.ts || 0) || ((v.ts || 0) === (r.ts || 0) && (v.n || 0) > (r.n || 0))) out.progress[k] = v;
     });
     out.mem = { ...(remote.mem || {}) };
     Object.entries(local.mem || {}).forEach(([k, v]) => { const cur = out.mem[k]; if (!cur || (v && (v.ts || 0) > (cur.ts || 0))) out.mem[k] = v; });
@@ -340,14 +387,20 @@
     return out;
   }
   async function pullFromRepo(u, silent) {
+    LAST_PULL = now();
     const path = `logs/${encodeURIComponent(u)}.json`;
     try {
       const f = await api.read(path);
       if (!f) { if (!silent) toast('远端暂无该用户日志'); return; }
+      if (S.user !== u) return;                  // 切用户后才回来的响应，直接丢弃
       const remote = JSON.parse(f.text);
-      S.rec = mergeRec(S.rec, remote);
-      saveJSON(LS.rec(u), S.rec);
-      setSync('ok', S.token ? '已同步 ' + hhmm(now()) : '已读取远端');
+      const before = JSON.stringify(S.rec);
+      const merged = mergeRec(S.rec, remote);
+      const changed = JSON.stringify(merged) !== before;
+      if (!adoptRec(merged, u)) return;
+      if (changed) afterRemoteRec();
+      if (S._dirty) { setSync('pending', '远端已更新，本机改动待写入'); scheduleSync(); }
+      else setSync('ok', S.token ? '已同步 ' + hhmm(now()) : '已读取远端');
     } catch (e) {
       setSync('fail', '读取失败：' + e.message);
     }
@@ -356,32 +409,75 @@
     if (!S.token || !S.user) { setSync(S.token ? 'idle' : 'off', S.token ? '待同步' : '仅本地'); return; }
     setSync('pending', '有改动，等待写入');
     clearTimeout(S._syncTimer);
-    S._syncTimer = setTimeout(pushToRepo, 4000);
+    S._syncTimer = setTimeout(pushToRepo, 1500);
   }
   async function pushToRepo() {
-    if (!S.token || !S.user || S._syncing) return;
+    if (!S.token || !S.user) return;
+    if (S._syncing) { S._dirty = true; return; }   // 正在写：记下“写完还要再写一次”，不能直接丢掉
     S._syncing = true; setSync('sync', '正在写入仓库…');
-    const path = `logs/${encodeURIComponent(S.user)}.json`;
+    const user = S.user;
+    const rev = S._rev || 0;
+    const path = `logs/${encodeURIComponent(user)}.json`;
+    let success = false;
     try {
       const cur = await api.read(path);
+      if (S.user !== user) return;               // 用户已切换：这次写入作废
       // 推送前先与远端合并，避免旧设备用空数据覆盖别的设备的收藏/熟练度/断点
-      if (cur && cur.text) { try { S.rec = mergeRec(S.rec, JSON.parse(cur.text)); saveJSON(LS.rec(S.user), S.rec); } catch (e) { } }
+      if (cur && cur.text) { try { adoptRec(mergeRec(S.rec, JSON.parse(cur.text)), user); } catch (e) { } }
+      const idxOnConflict = latest => {
+        let old = []; try { old = JSON.parse(latest).users || []; } catch (e) { }
+        return JSON.stringify({ users: Array.from(new Set([...allUsers(), ...old])).filter(Boolean) });
+      };
+      const pushIndex = async () => {
+        try {
+          const idxCur = await api.read('logs/index.json');
+          await api.write('logs/index.json', JSON.stringify({ users: allUsers() }), 'log index update', idxCur && idxCur.sha, { onConflict: idxOnConflict });
+        } catch (e) { }   // 索引只是用户列表，失败不影响主记录
+      };
       const body = JSON.stringify(S.rec, null, 0);
-      if (cur && cur.text === body) { setSync('ok', '已同步 ' + hhmm(now())); S._syncing = false; return; }
-      await api.write(path, body, `log: ${S.user} ${new Date().toISOString().slice(0, 16)}`, cur && cur.sha);
-      await api.write('logs/index.json', JSON.stringify({ users: allUsers() }), 'log index update', (await api.read('logs/index.json') || {}).sha);
+      if (cur && cur.text === body) {
+        success = true;
+        if (rev === (S._rev || 0)) { S._dirty = false; localStorage.removeItem(pendKey(user)); }
+        S._retryN = 0;
+        setSync('ok', '已同步 ' + hhmm(now()));
+        await pushIndex();
+        return;
+      }
+      const onConflict = latest => {
+        // 409：别的设备刚写过，把最新远端再合并进来，而不是拿旧快照覆盖
+        try { adoptRec(mergeRec(S.rec, JSON.parse(latest)), user); return JSON.stringify(S.rec); }
+        catch (e) { return body; }
+      };
+      await api.write(path, body, `log: ${user} ${new Date().toISOString().slice(0, 16)}`, cur && cur.sha, { onConflict });
+      await pushIndex();
+      success = true; S._retryN = 0;
+      if (rev === (S._rev || 0)) { S._dirty = false; localStorage.removeItem(pendKey(user)); }
       setSync('ok', '已同步 ' + hhmm(now()));
     } catch (e) {
+      S._dirty = true;
       if (e.code === 'no_token') setSync('off', '仅本地');
-      else setSync('fail', e.message + (syncErrText(e) ? '\n' + syncErrText(e) : ''));
-    } finally { S._syncing = false; }
+      else {
+        setSync('fail', e.message + (syncErrText(e) ? '\n' + syncErrText(e) : ''));
+        if ((!e.status || e.status >= 500) && (S._retryN || 0) < 3) {
+          // 网络/服务端抖动：退避补推 3 次，避免离线时无限重试耗电
+          const delay = [8000, 20000, 45000][S._retryN || 0];
+          S._retryN = (S._retryN || 0) + 1;
+          clearTimeout(S._retryTimer);
+          S._retryTimer = setTimeout(pushToRepo, delay);
+        }
+      }
+    } finally {
+      const switched = (S.user !== user);
+      S._syncing = false;
+      if ((success || switched) && S._dirty) { clearTimeout(S._syncTimer); S._syncTimer = setTimeout(pushToRepo, 300); }
+    }
   }
   function syncErrText(e) {
     const st = e.status, m = e.message || '';
     if (st === 401) return '提示：令牌无效或已被删除，请重新生成（需勾选 877-biochem，Contents 读写）';
     if (st === 403) return '提示：令牌权限不足，需 Contents: Read and write';
     if (st === 404) return '提示：仓库或用户目录不存在，检查仓库名 owner/repo';
-    if (st === 409) return '提示：文件冲突，重试一次即可';
+    if (st === 409) return '提示：多设备同时写入，已自动合并；如仍失败请点刷新后再试';
     if (/Failed to fetch|network/i.test(m)) return '提示：网络不通，稍后重试';
     return '';
   }
@@ -404,10 +500,20 @@
       if (f) { const j = JSON.parse(f.text); saveJSON('qb.remoteUsers', j.users || []); }
     } catch (e) { }
   }
+  async function flushThenSwitch(u) {
+    const old = S.user;
+    if (S.token && old && old !== u && S._dirty) {
+      await Promise.race([pushToRepo(), new Promise(r => setTimeout(r, 2500))]);
+    }
+    setUser(u);
+  }
   function setUser(u, silent) {
     S.user = u; localStorage.setItem(LS.cur, u);
+    clearTimeout(S._syncTimer); clearTimeout(S._retryTimer);
+    S._dirty = false; S._rev = 0;
     const users = allUsers(); if (!users.includes(u)) { users.push(u); saveJSON(LS.users, users); }
     loadRec(u); loadSess(u); updateUserName(); render();
+    if (loadJSON(pendKey(u), 0)) { S._dirty = true; if (S.token) scheduleSync(); }   // 上次没写回的改动，继续补推
     if (!silent && S.token) pullFromRepo(u, true);
     else if (!S.token) setSync('off', '仅本地（未配置令牌）');
   }
@@ -1132,14 +1238,14 @@
   function noteDraftOf(q) {
     const d = loadJSON('qb.noteDraft', {}) || {};
     if (d[q.id] !== undefined) return d[q.id];
-    const mine = (NOTES[q.id] || []).filter(n => (n.u || '') === (S.user || ''));
+    const mine = visibleNotes(q.id).filter(n => (n.u || '') === (S.user || ''));
     return mine.length ? mine[mine.length - 1].t : '';
   }
   function setNoteDraft(qid, v) {
     const d = loadJSON('qb.noteDraft', {}) || {}; d[qid] = v; saveJSON('qb.noteDraft', d);
   }
   function notesInlineHTML(q) {
-    const list = NOTES[q.id] || [];
+    const list = visibleNotes(q.id);
     const rows = list.map(n => `<div class="noteitem">
         <div class="row" style="justify-content:space-between">
           <b class="noteuser">${esc(n.u || '匿名')}</b>
@@ -1160,7 +1266,7 @@
 
   /* ---------- 笔记面板 ---------- */
   function noteHTML(q) {
-    const list = NOTES[q.id] || [];
+    const list = visibleNotes(q.id);
     const mine = list.filter(n => (n.u || '') === (S.user || ''));
     const rows = list.map(n => `<div class="card" style="margin-top:10px;padding:12px 14px">
         <div class="row" style="justify-content:space-between">
@@ -1191,9 +1297,15 @@
       let obj = {};
       if (cur && cur.text) { try { obj = JSON.parse(cur.text) || {}; } catch (e) { obj = {}; } }
       obj = mergeNotes(obj, NOTES);
-      const list = (obj[q.id] || []).filter(n => (n.u || '') !== entry.u);   // 每人每题保留最新一条，旧的可改
+      const list = (obj[q.id] || []).filter(n => (n.u || '') !== entry.u);   // 每人每题保留最新一条，旧的可改/可覆盖删除
       list.push(entry); obj[q.id] = list;
-      await api.write('notes.json', JSON.stringify(obj, null, 1), 'note: ' + q.id + ' by ' + (S.user || ''), cur && cur.sha);
+      const onConflict = latest => {
+        let o = {}; try { o = JSON.parse(latest) || {}; } catch (e) { }
+        o = mergeNotes(o, obj);
+        const l = (o[q.id] || []).filter(n => (n.u || '') !== entry.u); l.push(entry); o[q.id] = l;
+        obj = o; return JSON.stringify(o, null, 1);
+      };
+      await api.write('notes.json', JSON.stringify(obj, null, 1), 'note: ' + q.id + ' by ' + (S.user || ''), cur && cur.sha, { onConflict });
       NOTES = mergeNotes(NOTES, { [q.id]: [entry] });
       NOTES[q.id] = list;
       saveJSON('qb.notes', NOTES);
@@ -1210,11 +1322,19 @@
       const cur = await api.read('notes.json');
       let obj = (cur && cur.text) ? JSON.parse(cur.text) : {};
       obj = mergeNotes(obj, NOTES);
-      obj[q.id] = (obj[q.id] || []).filter(n => !((n.u || '') === (S.user || '') && n.ts === ts));
-      if (!obj[q.id].length) delete obj[q.id];
-      await api.write('notes.json', JSON.stringify(obj, null, 1), 'note: 删除笔记 ' + q.id, cur && cur.sha);
-      NOTES = mergeNotes(NOTES, {}); NOTES[q.id] = obj[q.id] || [];
-      if (!NOTES[q.id].length) delete NOTES[q.id];
+      const tomb = { u: S.user || '', del: 1, ts: now() };
+      obj[q.id] = (obj[q.id] || []).filter(n => (n.u || '') !== (S.user || ''));
+      obj[q.id].push(tomb);
+      const onConflict = latest => {
+        let o = {}; try { o = JSON.parse(latest) || {}; } catch (e) { }
+        o = mergeNotes(o, obj);
+        o[q.id] = (o[q.id] || []).filter(n => (n.u || '') !== (S.user || ''));
+        o[q.id].push(tomb);
+        obj = o; return JSON.stringify(o, null, 1);
+      };
+      await api.write('notes.json', JSON.stringify(obj, null, 1), 'note: 删除笔记 ' + q.id, cur && cur.sha, { onConflict });
+      NOTES = mergeNotes(NOTES, { [q.id]: [tomb] });
+      NOTES[q.id] = (NOTES[q.id] || []).filter(n => (n.u || '') !== (S.user || '')).concat([tomb]);
       saveJSON('qb.notes', NOTES); openSheet(noteHTML(q)); render(); toast('已删除');
     } catch (e) { toast('删除失败：' + ((e && e.message) || '未知错误')); }
   }
@@ -1424,7 +1544,12 @@
       const batch = (S.fix.batch || []).filter(id => id !== q.id);
       obj[q.id] = entry;
       batch.forEach(id => { obj[id] = Object.assign({}, entry); });
-      await api.write('fixes.json', JSON.stringify(obj, null, 1), 'fix: 纠错 ' + q.id + (batch.length ? ' + ' + batch.length + ' 同题' : '') + (S.user ? ' by ' + S.user : ''), cur && cur.sha);
+      const onConflict = latest => {
+        let o = {}; try { o = JSON.parse(latest) || {}; } catch (e) { }
+        o = mergeFixObjects(o, obj);
+        obj = o; return JSON.stringify(o, null, 1);
+      };
+      await api.write('fixes.json', JSON.stringify(obj, null, 1), 'fix: 纠错 ' + q.id + (batch.length ? ' + ' + batch.length + ' 同题' : '') + (S.user ? ' by ' + S.user : ''), cur && cur.sha, { onConflict });
       FIXES = obj; saveJSON('qb.fixes', FIXES);
       applyFix(q); batch.forEach(id => { const x = BANK.find(y => y.id === id); if (x) applyFix(x); });
       if (typeof rebuildHay === 'function') rebuildHay();
@@ -1495,6 +1620,7 @@
       render(); toast('已刷新');
     } catch (e) {
       S._refreshing = false;
+      const rb = document.querySelector('.refb'); if (rb) rb.classList.remove('busy');
       toast('刷新失败：' + ((e && e.message) || '未知错误'));
     }
   }
@@ -1761,11 +1887,11 @@
         case 'toSetup': NAV = []; S.view = 'setup'; S.tab = 'quiz'; render(); return;
         case 'syncNow': if (!S.token) { tokenSheet(); return; } toast('同步中…'); await pushToRepo(); statusSheet(); render(); return;
         case 'switchUser': userSheet(); return;
-        case 'pickUser': setUser(v); closeSheet(); return;
+        case 'pickUser': flushThenSwitch(v); closeSheet(); return;
         case 'createUser': {
           const v2 = ($('newUser').value || '').trim().replace(/[\\/:*?"<>|]/g, '');
           if (!v2) { toast('请输入用户名'); return; }
-          setUser(v2); closeSheet(); return;
+          flushThenSwitch(v2); closeSheet(); return;
         }
         case 'tokenSheet': tokenSheet(); return;
         case 'saveToken': {
@@ -1799,7 +1925,7 @@
         try {
           const j = JSON.parse(rd.result);
           if (!j || typeof j !== 'object' || !j.progress) throw new Error('格式不对');
-          S.rec = mergeRec(S.rec, { ...j, u: S.user });
+          adoptRec(mergeRec(S.rec, { ...j, u: S.user }));
           saveRec(); closeSheet(); toast('已导入并合并'); render();
         } catch (err) { toast('导入失败：' + err.message); }
       };
@@ -1850,7 +1976,28 @@
     loadRemoteIndex(); loadFixesRemote(); loadNotesRemote(); loadDedupRemote();
     if (S.token) pullFromRepo(cur, true); else setSync('off', '仅本地（未配置令牌）');
   }
-  window.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveSess(); });
-  window.addEventListener('pagehide', () => { saveSess(); if (S.token && S.user) { const body = JSON.stringify(S.rec); try { navigator.sendBeacon && 0; } catch (e) { } } });
+  async function autoPull(force) {
+    if (document.visibilityState !== 'visible') return;
+    if (force || now() - LAST_SHARED > 60000) {  // 别人的纠错/笔记/去重开关，回到前台也拉一次
+      LAST_SHARED = now();
+      Promise.allSettled([loadRemoteIndex(), loadFixesRemote(true), loadNotesRemote(true), loadDedupRemote(true)]);
+    }
+    if (!S.token || !S.user) return;
+    if (!force && now() - LAST_PULL < 20000) return;
+    LAST_PULL = now();
+    await pullFromRepo(S.user, true);
+  }
+  function flushSync() {
+    if (!S.token || !S.user) return;
+    clearTimeout(S._syncTimer);
+    pushToRepo();
+  }
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') { saveSess(); flushSync(); }
+    else autoPull();                       // 手机切回来先拉一次别的设备的改动
+  });
+  window.addEventListener('focus', () => { autoPull(); });
+  window.addEventListener('online', () => { autoPull(true); if (S._dirty) pushToRepo(); });
+  window.addEventListener('pagehide', () => { saveSess(); flushSync(); });
   boot();
 })();
